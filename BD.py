@@ -1,6 +1,7 @@
 import json
+import sys
 
-class DataBase:
+class DataBase():
 
     def __init__(self, name):
         #self.vizinhos = {}
@@ -8,10 +9,10 @@ class DataBase:
         with open('config.json', 'r') as file:
             ip_config = json.load(file)
 
-        vizinhos = ip_config.get(name, [])
+        self.vizinhos = ip_config.get(name, [])
 
         print(self.vizinhos)
 
 
 if __name__ == '__main__':
-    db = DataBase()
+    db = DataBase(sys.argv[1])
