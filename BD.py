@@ -1,6 +1,7 @@
 import json
+import sys
 
-class DataBase:
+class DataBase():
 
     def __init__(self, name):
         #self.vizinhos = {}
@@ -14,4 +15,4 @@ class DataBase:
 
 
 if __name__ == '__main__':
-    db = DataBase()
+    db = DataBase(sys.argv[1])
