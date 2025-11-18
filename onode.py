@@ -2,7 +2,7 @@ import socket
 import sys
 import threading
 import queue
-
+from BD import DataBase
 
 class Router:
     def __init__(self, router_host, router_port):
@@ -18,15 +18,26 @@ class Router:
 def main():
     sys.stdout.write(f"\033]0;{socket.gethostname()}\007")
     sys.stdout.flush()
-    
-    
 
-    """Executa o router"""
-    ROUTER_HOST = "127.0.0.1"  # Escuta em localhost
-    ROUTER_PORT = 5001       # Porta do router
+    if len(sys.argv) < 2:
+        sys.exit(1)
+    db = DataBase(sys.argv[1])
+
+    thread_listen = threading.Thread(target=, args=())
+    thread_sender = threading.Thread(target=, args=())
+
+    all_threads = [thread_listen, thread_sender]
+
+    for t in all_threads:
+        t.daemon = True
     
-    router = Router(ROUTER_HOST, ROUTER_PORT)
-    router.start()
+    for t in all_threads:
+        t.start()
+
+    for t in all_threads:
+        t.join()
+
+    
 
 
 if __name__ == '__main__':
