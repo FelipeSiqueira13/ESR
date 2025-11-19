@@ -3,16 +3,19 @@ import sys
 import threading
 import queue
 from BD import DataBase
+from msg import Message
 
-class Router:
-    def __init__(self, router_host, router_port):
-        """
-        Inicializa o Router que gerencia conexões com vizinhos (outros routers) e clientes
-        
-        Args:
-            router_host: Host onde este router vai escutar
-            router_port: Porta onde este router vai escutar
-        """
+RECEIVER_PORT = 40331
+SENDER_PORT = 50332
+
+
+def listener(db:DataBase):
+    print("Listener thread started")
+    sckt = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    msg = Message(Mensagem.ALIVE_RECEPTOR).serialize()
+    interval = 20
+    while True:
+        try:
 
 
 def main():
@@ -23,8 +26,8 @@ def main():
         sys.exit(1)
     db = DataBase(sys.argv[1])
 
-    thread_listen = threading.Thread(target=, args=())
-    thread_sender = threading.Thread(target=, args=())
+    thread_listen = threading.Thread(target=, args=(db,))
+    thread_sender = threading.Thread(target=, args=(db,))
 
     all_threads = [thread_listen, thread_sender]
 
