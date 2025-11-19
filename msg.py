@@ -1,4 +1,5 @@
 import datetime as dt
+import pickle
 
 class Message:
     STREAM_PLS = 1
@@ -29,7 +30,13 @@ class Message:
     def setSrc(self,newSrc):
         self.src = newSrc
 
+    def encode(self):
+        return pickle.dumps(self)
     
+    @staticmethod
+    def decode(data):
+        return pickle.loads(data)
+
     def serialize(self) -> bytes:
         return f"{self.mytype}|{self.timestamp.isoformat()}|{self.src}|{self.data}".encode('utf-8')
     
