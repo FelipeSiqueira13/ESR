@@ -1,6 +1,10 @@
 import json
 import sys
 
+"""
+preciso de algo para guardar o próprio endereço, a sofia n colocou, fiquei decepcionado
+"""
+
 class DataBase():
 
     def __init__(self, name):
