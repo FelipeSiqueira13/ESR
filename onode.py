@@ -6,7 +6,7 @@ from BD import DataBase
 from msg import Message
 
 RECEIVER_PORT = 40331
-SENDER_PORT = 50332
+SENDER_PORT = 40332
 
 
 def listener(db:DataBase):
