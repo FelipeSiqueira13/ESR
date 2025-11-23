@@ -10,6 +10,7 @@ class DataBase():
             ip_config = json.load(file)
 
         self.vizinhos = ip_config.get(name, [])
+        self.vizinhos_inicializados = {viz: 0 for viz in self.vizinhos}
 
         self.available_streams = []
         self.active_streams_table = {}
@@ -25,6 +26,13 @@ class DataBase():
         # uma entrada de tabela para cada vizinho
         for viz in self.vizinhos:
             self.active_streams_table[viz] = {}
+
+
+        # print(self.vizinhos)
+
+    #-------------------------------------------------------------
+    #-------------FUNCTIONS FOR ACTIVE STREAMS TABLE--------------
+    #-------------------------------------------------------------
 
     # será necessário fornecer tmb a origem (vizinho) da stream?
     def addStream(self, stream_id):
@@ -58,15 +66,44 @@ class DataBase():
             valores = " ".join(f"{self.active_streams_table[v][s]:>4}" for s in self.available_streams)
             print(f"{v:>4} {valores}")
 
-        
-        # print(self.vizinhos)
+    
+    #-------------------------------------------------------------
+    #-------------FUNCTIONS FOR STREAM ORIGINS TABLE--------------
+    #-------------------------------------------------------------
 
+    #def add_stream_origin
+
+
+    #-------------------------------------------------------------
+    #------------FUNCTIONS FOR NEIGHBOURS IN OVERLAY--------------
+    #-------------------------------------------------------------
+
+    def inicializaVizinho(self, viz):
+        if viz in self.vizinhos:
+            self.vizinhos_inicializados[viz] = 1
+            print("Neighbour {viz} initialized.\n")
+        else:
+            print("Neighbour {viz} could not be initialized.\n")
+
+    
+    def removeVizinho(self, viz):
+        if viz in self.vizinhos:
+            self.vizinhos_inicializados[viz] = 0
+            print("Neighbour {viz} removed.\n")
+        else:
+            print("Neighbour {viz} could not be removed.\n")
+    
+    # para debugging
+    def printVizinhosInicializados(self):
+        for viz, status in self.vizinhos_inicializados.items():
+            print(f"{viz}: {status}")
 
 
 
 if __name__ == '__main__':
     db = DataBase(sys.argv[1])
     
+
     # Para testar
     db.printActiveStreamsTable()
     db.addStream("s1")
