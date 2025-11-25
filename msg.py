@@ -2,13 +2,14 @@ import datetime as dt
 import pickle
 
 class Message:
-    STREAM_PLS = 1
-    VIDEO_NO = 2
-    WHAT_VIDEO = 3
-    VIDEO_METRIC = 4
-    ADD_NEIGHBOUR = 5
-    REMOVE_NEIGHBOUR = 6
-    RESP_NEIGHBOUR = 7
+    STREAM_REQUEST = 1
+    STREAM_STOP = 2
+    STREAMS_AVAILABLE = 3
+    RESP_WHAT_VIDEO = 4
+    VIDEO_METRIC = 5
+    ADD_NEIGHBOUR = 6
+    REMOVE_NEIGHBOUR = 7
+    RESP_NEIGHBOUR = 8
 
     def __init__(self, type,src,data:str=""):
         self.mytype = type    

@@ -71,9 +71,9 @@ def listener(db:DataBase):
             dados, addr = sckt.recvfrom(1024)
             msg = Message.deserialize(dados)
             typeOfMsg = msg.getType() 
-            if typeOfMsg == Message.STREAM_PLS:
+            if typeOfMsg == Message.STREAM_REQUEST:
                 threading.Thread(target=stream_pls_handler, args=(msg, db)).start()
-            elif typeOfMsg == Message.VIDEO_NO:
+            elif typeOfMsg == Message.STREAM_STOP:
                 threading.Thread(target=stream_no_handler, args=(msg, db)).start()
         except Exception as e:
             print("Error in listener: ", e)
