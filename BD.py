@@ -13,10 +13,26 @@ class DataBase():
         with open('config.json', 'r') as file:
             ip_config = json.load(file)
 
-        self.vizinhos = ip_config.get(name, [])
+        self.ip_to_viz = ip_config.get(name, [])
 
-        print(self.vizinhos)
+        print(self.ip_to_viz)
+
+    def get_vizinhos(self):
+    
+        return self.ip_to_viz.values()
+    
+    def get_my_ip(self, vizinho):
+        for ip, endereco in self.ip_to_viz.items():
+            if endereco == vizinho:
+                return ip
+        return None
+    
 
 
 if __name__ == '__main__':
-    db = DataBase(sys.argv[1])
+    if len(sys.argv) < 2:  
+        db = DataBase("R1")   #alterar isso no trabalho final para um erro
+    else:
+        db = DataBase(sys.argv[1])
+    print(db.get_vizinhos())
+    print(db.get_my_ip(list(db.get_vizinhos())[1]))
