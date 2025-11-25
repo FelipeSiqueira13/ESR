@@ -20,7 +20,7 @@ def get_available_streams(switch_host, switch_port, clientName):
             s.connect((switch_host, switch_port))
 
             #Enviar pedido de streams disponiveis
-            request_message = Message(Message.STREAM_PLS, None, clientName,"")
+            request_message = Message(Message.WHAT_VIDEO, None, clientName,"")
             s.send(request_message.encode())
 
             #Receber resposta com streams disponiveis
@@ -45,7 +45,7 @@ def requestStream(switch_host, switch_port, client_name, stream_number):
             s.connect((switch_host, switch_port))
 
             #Enviar pedido de stream
-            request_message = Message(Message.REQUEST_STREAM, stream_number, client_name)
+            request_message = Message(Message.STREAM_PLS, stream_number, client_name)
             s.send(request_message.encode())
 
             #Receber resposta
