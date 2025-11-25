@@ -14,6 +14,7 @@ class Message:
         self.mytype = type    
         self.timestamp = dt.datetime.now()
         self.src = src
+        self.data = data
 
     def getType(self):
         return self.mytype
@@ -21,8 +22,8 @@ class Message:
     def getTimestamp(self):
         return self.timestamp
     
-    def getStream(self):
-        return self.stream
+    def getData(self):
+        return self.data
     
     def getSrc(self):
         return self.src
@@ -30,16 +31,17 @@ class Message:
     def setSrc(self,newSrc):
         self.src = newSrc
 
-    def encode(self):
-        return pickle.dumps(self)
-    
-    @staticmethod
-    def decode(data):
-        return pickle.loads(data)
+    def encode(self) -> bytes:
+        return self.serialize()
 
+    @staticmethod
+    def decode(data: bytes):
+        return Message.deserialize(data)
+    
     def serialize(self) -> bytes:
         return f"{self.mytype}|{self.timestamp.isoformat()}|{self.src}|{self.data}".encode('utf-8')
-    
+
+    @staticmethod
     def deserialize(data:bytes):
         decoded = data.decode('utf-8')
         parts = decoded.split('|', 3)

@@ -29,10 +29,6 @@ class DataBase():
         for viz in self.vizinhos:
             self.active_streams_table[viz] = {}
 
-    # =============================================================
-    #                  FUNÇÕES DO PRIMEIRO ARQUIVO
-    # =============================================================
-
     def get_vizinhos(self):
         """Retorna apenas os endereços"""
         return self.ip_to_viz.values()
@@ -44,13 +40,10 @@ class DataBase():
                 return ip
         return None
 
-    # =============================================================
-    #           FUNÇÕES DA TABELA DE STREAMS (arquivo 2)
-    # =============================================================
-
-    def addStream(self, stream_id):
+    def addStream(self, stream_id, origin_ip):
         if stream_id not in self.available_streams:
             self.available_streams.append(stream_id)
+            self.streams_origin_table[stream_id] = origin_ip
 
             for viz in self.vizinhos:
                 self.active_streams_table[viz][stream_id] = 0
@@ -60,24 +53,45 @@ class DataBase():
             print(f"Stream {stream_id} already exists.\n")
 
     def activateStream(self, viz, stream_id):
+        is_stream_active = False
         if stream_id in self.available_streams and viz in self.active_streams_table:
+            for v in self.vizinhos:
+                if self.active_streams_table[v][stream_id] == 1:
+                    is_stream_active = True
+                    break
             self.active_streams_table[viz][stream_id] = 1
             print(f"Stream {stream_id} activated for neighbour {viz}.\n")
         else:
             print(f"ERROR: Stream {stream_id} cannot be activated for {viz}.\n")
+        return is_stream_active
 
     def deactivateStream(self, viz, stream_id):
+        is_stream_active = False
         if stream_id in self.available_streams and viz in self.active_streams_table:
             self.active_streams_table[viz][stream_id] = 0
+            for v in self.vizinhos:
+                if self.active_streams_table[v][stream_id] == 1:
+                    is_stream_active = True
+                    break
             print(f"Stream {stream_id} deactivated for neighbour {viz}.\n")
         else:
             print(f"ERROR: Stream {stream_id} cannot be deactivated for {viz}.\n")
+        return is_stream_active
 
     def printActiveStreamsTable(self):
         print("         " + " ".join(f"{s:>4}" for s in self.available_streams))
         for v in self.vizinhos:
             valores = " ".join(f"{self.active_streams_table[v][s]:>4}" for s in self.available_streams)
             print(f"{v:>4} {valores}")
+
+    def getStreamSource(self, stream_id):
+        stream_source = None
+        if stream_id in self.streams_origin_table:
+            stream_source = self.streams_origin_table[stream_id]
+            return stream_source
+        else:
+            print(f"ERROR: Stream {stream_id} has no known source.\n")
+            return None
 
     # =============================================================
     #           FUNÇÕES DE OVERLAY / VIZINHOS (arquivo 2)
@@ -116,9 +130,9 @@ if __name__ == '__main__':
 
     # testes antigos
     db.printActiveStreamsTable()
-    db.addStream("s1")
-    db.addStream("s2")
-    db.addStream("s3")
+    db.addStream("s1", "10.0.0.10")
+    db.addStream("s2", "10.0.0.10")
+    db.addStream("s3", "10.0.0.10")
 
     db.printActiveStreamsTable()
 
