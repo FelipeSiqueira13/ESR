@@ -16,9 +16,9 @@ def listener(db:DataBase):
     sckt.bind(('', RECEIVER_PORT))
     while True:
         try:
-        dados, addr = sckt.recvfrom(1024)
-        msg = Message.deserialize(dados)
-        db.processMessage(msg, addr)
+            dados, addr = sckt.recvfrom(1024)
+            msg = Message.deserialize(dados)
+            db.processMessage(msg, addr)
         except:
 
 
