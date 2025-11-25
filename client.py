@@ -1,26 +1,41 @@
 import socket
-import sys
+import sys, json
 from msg import Message
 from database import DataBase
+from onode import send_message
 
-def get_switch_info(clientName):
+def get_node_info(clientName):
     db = DataBase(clientName)
     if db.vizinhos:
-        switch_host = db.vizinhos[0]
-        switch_port = 40331 # Porta Receiver dos Routers
-        return switch_host, switch_port
+        node_host = db.vizinhos[0]
+        node_port = 40331 # Porta Receiver dos Routers
+        return node_host, node_port
     else:
         print("No neighbors found in the database.")
         return None, None
+    
+def get_client_ip(clientName):
+    with open('config.json', 'r') as file:
+        ip_config = json.load(file)
+    
+    client_data = ip_config.get(clientName, {})
+    
+    if client_data:
+        return list(client_data.keys())[0]
+    else:
+        return None
 
-def get_available_streams(switch_host, switch_port, clientName):
+
+def get_available_streams(node_host, node_port, clientName):
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(5)
-            s.connect((switch_host, switch_port))
+            s.connect((node_host, node_port))
+
+            source = get_client_ip(clientName)
 
             #Enviar pedido de streams disponiveis
-            request_message = Message(Message.STREAMS_AVAILABLE, None, clientName,"")
+            request_message = Message(Message.STREAMS_AVAILABLE, source, "")
             s.send(request_message.encode())
 
             #Receber resposta com streams disponiveis
@@ -35,17 +50,19 @@ def get_available_streams(switch_host, switch_port, clientName):
                 print("Error parsing streams from response:", e)
                 return []
     except Exception as e:
-        print("Error connecting to switch:", e)
+        print("Error connecting to node:", e)
         return []
 
-def requestStream(switch_host, switch_port, client_name, stream_number):
+def requestStream(node_host, node_port, client_name, stream_number):
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(5)
-            s.connect((switch_host, switch_port))
+            s.connect((node_host, node_port))
+
+            source = get_client_ip(client_name)
 
             #Enviar pedido de stream
-            request_message = Message(Message.STREAM_REQUEST, stream_number, client_name)
+            request_message = Message(Message.STREAM_REQUEST, source, stream_number)
             s.send(request_message.encode())
 
             #Receber resposta
@@ -64,19 +81,19 @@ def main():
     clientName = sys.argv[1]
     print(f"Client {clientName} inicialized")
 
-    #Verificar qual switch correspondente
-    switch_host, switch_port = get_switch_info(clientName)
-    if not switch_host:
-        print(f"No switch information found for client {clientName}")
+    #Verificar qual node correspondente
+    node_host, node_port = get_node_info(clientName)
+    if not node_host:
+        print(f"No node information found for client {clientName}")
         sys.exit(1)
 
-    print("Connecting to switch at {}:{}".format(switch_host, switch_port))
+    print("Connecting to node at {}:{}".format(node_host, node_port))
 
-    print("Trying to receive streams available from switch...")
-    streams = get_available_streams(switch_host, switch_port, clientName)
+    print("Trying to receive streams available from node...")
+    streams = get_available_streams(node_host, node_port, clientName)
 
     if not streams:
-        print("No streams received from switch.")
+        print("No streams received from node.")
         sys.exit(1)
 
     print("\nAvailable streams:")
@@ -94,10 +111,10 @@ def main():
                 print("Invalid choice. Please try again.")
                 continue
 
-            choice_num = int(stream_choice)
+            choice_num = stream_choice
             print(f"Requesting stream: {choice_num}")
-            response = requestStream(switch_host, switch_port, clientName, choice_num)
-            print("Response from switch:", response)
+            response = requestStream(node_host, node_port, clientName, choice_num)
+            print("Response from node:", response)
         except KeyboardInterrupt:
             print("\nExiting.")
             break
