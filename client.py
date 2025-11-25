@@ -45,7 +45,7 @@ def requestStream(switch_host, switch_port, client_name, stream_number):
             s.connect((switch_host, switch_port))
 
             #Enviar pedido de stream
-            request_message = Message(Message.STREAM_PLS, stream_number, client_name)
+            request_message = Message(Message.STREAM_REQUEST, stream_number, client_name)
             s.send(request_message.encode())
 
             #Receber resposta
