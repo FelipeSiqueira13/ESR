@@ -20,7 +20,7 @@ def get_available_streams(switch_host, switch_port, clientName):
             s.connect((switch_host, switch_port))
 
             #Enviar pedido de streams disponiveis
-            request_message = Message(Message.WHAT_VIDEO, None, clientName,"")
+            request_message = Message(Message.STREAMS_AVAILABLE, None, clientName,"")
             s.send(request_message.encode())
 
             #Receber resposta com streams disponiveis

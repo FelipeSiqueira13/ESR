@@ -3,6 +3,7 @@ import sys
 import threading
 import queue
 from database import DataBase
+from server_database import DataBase as sdb
 from msg import Message
 
 RECEIVER_PORT = 40331
@@ -31,7 +32,6 @@ def stream_no_handler(msg:Message, db:DataBase):
     if not is_active:
         threading.Thread(target=stream_stop_handler, args=(stream_id, db)).start()
 
-
 def stream_request_handler(stream_id, db:DataBase):
     streamOrigin = db.getStreamSource(stream_id)
     if streamOrigin:
@@ -43,6 +43,17 @@ def stream_stop_handler(stream_id, db:DataBase):
     if streamOrigin:
         msg = Message(Message.VIDEO_NO, db.get_my_ip(streamOrigin), stream_id)
         send_message(msg, streamOrigin, RECEIVER_PORT)
+    
+def streams_available_handler(msg, db:DataBase):
+    streams = sdb.get_streams() # depois tirar o sbd 
+    data = ",".join(streams)
+    if data == "":
+        data = "No streams available"
+
+    source = msg.getSrc()
+  
+    response = Message(Message.RESP_STREAMS_AVAILABLE, db.get_my_ip(source), data)
+    send_message(response, source, RECEIVER_PORT)
 
 
 # =============================================================
@@ -55,7 +66,6 @@ def wake_router_handler(vizinhos, db:DataBase):
         src_ip = db.get_my_ip(viz)
         msg = Message(Message.ADD_NEIGHBOUR, src_ip, "")
         send_message(msg, viz, ROUTERS_RECEIVER_PORT)
-
 
 
 # =============================================================
@@ -75,6 +85,8 @@ def listener(db:DataBase):
                 threading.Thread(target=stream_pls_handler, args=(msg, db)).start()
             elif typeOfMsg == Message.STREAM_STOP:
                 threading.Thread(target=stream_no_handler, args=(msg, db)).start()
+            elif typeOfMsg == Message.STREAMS_AVAILABLE:
+                threading.Thread(target=streams_available_handler, args=(msg, db)).start()
         except Exception as e:
             print("Error in listener: ", e)
             break
