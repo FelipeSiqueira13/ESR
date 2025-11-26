@@ -3,5 +3,10 @@
         "streams": {
             "stream1": "videos/movie.Mjpeg"
         }   
+    },
+    "S2": {
+        "streams": {
+            "stream2": "videos/movie.Mjpeg"
+        }
     }
 }

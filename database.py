@@ -1,6 +1,8 @@
 import json
 import sys
 
+import threading
+
 class DataBase():
 
     def __init__(self, name):
@@ -12,6 +14,7 @@ class DataBase():
         # ip_to_viz = { ip : endereco }
         # agora mantendo o dicionário, não lista
         self.ip_to_viz = ip_config.get(name, {})
+        self.lock = threading.Lock()
 
         print("Vizinhos carregados:", self.ip_to_viz)
 
@@ -41,42 +44,45 @@ class DataBase():
         return None
 
     def addStream(self, stream_id, origin_ip):
-        if stream_id not in self.available_streams:
-            self.available_streams.append(stream_id)
-            self.streams_origin_table[stream_id] = origin_ip
+        with self.lock:
+            if stream_id not in self.available_streams:
+                self.available_streams.append(stream_id)
+                self.streams_origin_table[stream_id] = origin_ip
 
-            for viz in self.vizinhos:
-                self.active_streams_table[viz][stream_id] = 0
+                for viz in self.vizinhos:
+                    self.active_streams_table[viz][stream_id] = 0
 
-            print(f"Added stream {stream_id}.\n")
-        else:
-            print(f"Stream {stream_id} already exists.\n")
+                print(f"Added stream {stream_id}.\n")
+            else:
+                print(f"Stream {stream_id} already exists.\n")
 
     def activateStream(self, viz, stream_id):
-        is_stream_active = False
-        if stream_id in self.available_streams and viz in self.active_streams_table:
-            for v in self.vizinhos:
-                if self.active_streams_table[v][stream_id] == 1:
-                    is_stream_active = True
-                    break
-            self.active_streams_table[viz][stream_id] = 1
-            print(f"Stream {stream_id} activated for neighbour {viz}.\n")
-        else:
-            print(f"ERROR: Stream {stream_id} cannot be activated for {viz}.\n")
-        return is_stream_active
+        with self.lock:
+            is_stream_active = False
+            if stream_id in self.available_streams and viz in self.active_streams_table:
+                for v in self.vizinhos:
+                    if self.active_streams_table[v][stream_id] == 1:
+                        is_stream_active = True
+                        break
+                self.active_streams_table[viz][stream_id] = 1
+                print(f"Stream {stream_id} activated for neighbour {viz}.\n")
+            else:
+                print(f"ERROR: Stream {stream_id} cannot be activated for {viz}.\n")
+            return is_stream_active
 
     def deactivateStream(self, viz, stream_id):
-        is_stream_active = False
-        if stream_id in self.available_streams and viz in self.active_streams_table:
-            self.active_streams_table[viz][stream_id] = 0
-            for v in self.vizinhos:
-                if self.active_streams_table[v][stream_id] == 1:
-                    is_stream_active = True
-                    break
-            print(f"Stream {stream_id} deactivated for neighbour {viz}.\n")
-        else:
-            print(f"ERROR: Stream {stream_id} cannot be deactivated for {viz}.\n")
-        return is_stream_active
+        with self.lock:
+            is_stream_active = False
+            if stream_id in self.available_streams and viz in self.active_streams_table:
+                self.active_streams_table[viz][stream_id] = 0
+                for v in self.vizinhos:
+                    if self.active_streams_table[v][stream_id] == 1:
+                        is_stream_active = True
+                        break
+                print(f"Stream {stream_id} deactivated for neighbour {viz}.\n")
+            else:
+                print(f"ERROR: Stream {stream_id} cannot be deactivated for {viz}.\n")
+            return is_stream_active
 
     def printActiveStreamsTable(self):
         print("         " + " ".join(f"{s:>4}" for s in self.available_streams))
@@ -98,18 +104,20 @@ class DataBase():
     # =============================================================
 
     def inicializaVizinho(self, viz):
-        if viz in self.vizinhos:
-            self.vizinhos_inicializados[viz] = 1
-            print(f"Neighbour {viz} initialized.\n")
-        else:
-            print(f"Neighbour {viz} could not be initialized.\n")
+        with self.lock:
+            if viz in self.vizinhos:
+                self.vizinhos_inicializados[viz] = 1
+                print(f"Neighbour {viz} initialized.\n")
+            else:
+                print(f"Neighbour {viz} could not be initialized.\n")
 
     def removeVizinho(self, viz):
-        if viz in self.vizinhos:
-            self.vizinhos_inicializados[viz] = 0
-            print(f"Neighbour {viz} removed.\n")
-        else:
-            print(f"Neighbour {viz} could not be removed.\n")
+        with self.lock:
+            if viz in self.vizinhos:
+                self.vizinhos_inicializados[viz] = 0
+                print(f"Neighbour {viz} removed.\n")
+            else:
+                print(f"Neighbour {viz} could not be removed.\n")
 
     def printVizinhosInicializados(self):
         for viz, status in self.vizinhos_inicializados.items():

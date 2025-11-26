@@ -1,10 +1,11 @@
 import json
 import sys
 import threading
+# from database import DataBase
 
 import socket
 
-class DataBase():
+class ServerDataBase():
 
     def __init__(self, name):
 
@@ -22,8 +23,8 @@ class DataBase():
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:
-        db = DataBase("R1")   # alterar depois no trabalho final
+        sdb = ServerDataBase("S1")   # alterar depois no trabalho final
     else:
-        db = DataBase(sys.argv[1])
+        sdb = ServerDataBase(sys.argv[1])
 
-    print(db.get_streams())
+    print(sdb.get_streams())
