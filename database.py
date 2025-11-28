@@ -11,16 +11,21 @@ class DataBase():
         with open('config.json', 'r') as file:
             ip_config = json.load(file)
 
-        # ip_to_viz = { ip : endereco }
-        # agora mantendo o dicionário, não lista
-        self.ip_to_viz = ip_config.get(name, {})
+        # agora os valores podem ser listas; normaliza para dict ip -> [viz1, viz2, ...]
+        raw = ip_config.get(name, {})
+        self.ip_to_viz = {ip: (v if isinstance(v, list) else [v]) for ip, v in raw.items()}
         self.lock = threading.Lock()
 
-        print("Vizinhos carregados:", self.ip_to_viz)
+        print("Vizinhos carregados (ip -> [vizinhos]):", self.ip_to_viz)
 
-        # ----------- FORMATO ANTIGO (arquivo 2) -----------
-        # Agora vizinhos é a lista de endereços
-        self.vizinhos = list(self.ip_to_viz.values())
+        # cria lista plana de vizinhos e um mapa viz -> ip para busca reversa
+        self.vizinhos = []
+        self.viz_to_ip = {}
+        for ip, neighs in self.ip_to_viz.items():
+            for n in neighs:
+                self.vizinhos.append(n)
+                self.viz_to_ip[n] = ip
+
         self.vizinhos_inicializados = {viz: 0 for viz in self.vizinhos}
 
         # tabelas de streams
@@ -34,14 +39,12 @@ class DataBase():
 
     def get_vizinhos(self):
         """Retorna apenas os endereços"""
-        return self.ip_to_viz.values()
+        return list(self.vizinhos)
 
     def get_my_ip(self, vizinho):
         """Dado um endereço, retorna o IP correspondente"""
-        for ip, endereco in self.ip_to_viz.items():
-            if endereco == vizinho:
-                return ip
-        return None
+        # usa o mapa invertido para suportar múltiplos vizinhos por IP
+        return self.viz_to_ip.get(vizinho)
 
     def addStream(self, stream_id, origin_ip):
         with self.lock:

@@ -130,7 +130,7 @@ def cntrl(db:DataBase):
             if typeOfMsg == Message.ADD_NEIGHBOUR:
                 db.inicializaVizinho(msgr_ip)
                 msg_resp = Message(Message.RESP_NEIGHBOUR, db.get_my_ip(msgr_ip), "")
-                sckt.sendto(msg_resp.serialize(), (addr[0], ROUTERS_RECEIVER_PORT))
+                sckt.sendto(msg_resp.serialize(), (msgr_ip, ROUTERS_RECEIVER_PORT))
             elif typeOfMsg == Message.RESP_NEIGHBOUR:
                 db.inicializaVizinho(msgr_ip)
         except Exception as e:
