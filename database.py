@@ -1,5 +1,7 @@
+from asyncio import streams
 import json
 import sys
+import msg
 
 import threading
 
@@ -32,10 +34,12 @@ class DataBase():
         self.available_streams = []
         self.active_streams_table = {}
         self.streams_origin_table = {}
+        self.streams_metrics = {}
 
         # cria uma linha para cada vizinho
         for viz in self.vizinhos:
             self.active_streams_table[viz] = {}
+            self.streams_metrics[viz] = {}
 
     def get_vizinhos(self):
         """Retorna apenas os endereços"""
@@ -54,10 +58,26 @@ class DataBase():
 
                 for viz in self.vizinhos:
                     self.active_streams_table[viz][stream_id] = 0
+                    self.streams_metrics[viz][stream_id] = 0
 
                 print(f"Added stream {stream_id}.\n")
             else:
                 print(f"Stream {stream_id} already exists.\n")
+
+    def AtualizaMetricas(self, viz, streams_id, metric):
+        with self.lock:
+            for stream in streams_id:
+                self.streams_metrics[viz][stream] = metric*0.15 + self.streams_metrics[viz][stream]*0.85
+                v = self.streams_origin_table[stream]
+                if v == viz:
+                    if self.streams_metrics[viz][stream] < self.streams_metrics[v][stream] and self.streams_metrics[viz][stream] != 0:
+                        self.streams_origin_table[stream] = viz
+            
+    def StreamDeativated(self, viz, streams_id):
+        with self.lock:
+            for stream_id in streams_id:
+                self.streams_metrics[viz][stream_id] = 0
+    
 
     def activateStream(self, viz, stream_id):
         with self.lock:

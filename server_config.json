@@ -1,12 +1,15 @@
 {
     "S1": {
         "streams": {
-            "stream1": "videos/movie.Mjpeg"
+            "stream1": "videos/movie.Mjpeg",
+            "stream2": "videos/movie.Mjpeg",
+            "stream3": "videos/movie.Mjpeg"
         }   
     },
     "S2": {
         "streams": {
-            "stream2": "videos/movie.Mjpeg"
+            "stream3": "videos/movie.Mjpeg",
+            "stream4": "videos/movie.Mjpeg"
         }
     }
 }

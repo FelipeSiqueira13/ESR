@@ -17,6 +17,15 @@ class Message:
         self.src = src
         self.data = data
 
+    def stringfy(self, streams_id:list, temp:float):
+        return ",".join(streams_id) + f";{temp}"
+    
+    def parseStringfy(self, data_str: str):
+        streams_part, temp_part = data_str.split(";")
+        streams_id = streams_part.split(",") if streams_part else []
+        temp = float(temp_part)
+        return streams_id, temp
+
     def getType(self):
         return self.mytype
 

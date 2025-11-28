@@ -22,7 +22,7 @@ def stream_pls_handler(msg:Message, db:DataBase):
     need_stream = db.activateStream(ip_viz, stream_id)
     print(f"Processed STREAM_PLS for stream {stream_id} from {msg.getSrc()}.\n")
     if need_stream:
-        threading.Thread(target=stream_request_handler, args=(stream_id, db)).start()
+        stream_request_handler(stream_id, db)
 
 def stream_no_handler(msg:Message, db:DataBase):
     stream_id = msg.data
@@ -30,7 +30,7 @@ def stream_no_handler(msg:Message, db:DataBase):
     is_active = db.deactivateStream(ip_viz, stream_id)
     print(f"Processed VIDEO_NO for stream {stream_id} from {msg.getSrc()}.\n")
     if not is_active:
-        threading.Thread(target=stream_stop_handler, args=(stream_id, db)).start()
+        stream_stop_handler(stream_id, db)
 
 def stream_request_handler(stream_id, db:DataBase):
     streamOrigin = db.getStreamSource(stream_id)
@@ -67,6 +67,9 @@ def wake_router_handler(vizinhos, db:DataBase):
         msg = Message(Message.ADD_NEIGHBOUR, src_ip, "")
         send_message(msg, viz, ROUTERS_RECEIVER_PORT)
 
+def update_metrics(streams_id:list, metric, db:DataBase, viz):
+    db.AtualizaMetricas(viz, streams_id, metric)
+
 
 # =============================================================
 #                      PRINCIPAL THREADS
@@ -78,7 +81,7 @@ def listener(db:DataBase):
     sckt.bind(('', RECEIVER_PORT))
     while True:
         try:
-            dados, addr = sckt.recvfrom(1024)
+            dados, addr = sckt.recvfrom(4096)
             msg = Message.deserialize(dados)
             typeOfMsg = msg.getType() 
             if typeOfMsg == Message.STREAM_REQUEST:
@@ -123,16 +126,19 @@ def cntrl(db:DataBase):
     threading.Thread(target=wake_router_handler, args=(vizinhos, db)).start()
     while True:
         try:
-            dados, addr = sckt.recvfrom(1024)
+            dados, addr = sckt.recvfrom(4096)
             msg = Message.deserialize(dados)
             msgr_ip = msg.getSrc()
             typeOfMsg = msg.getType() 
             if typeOfMsg == Message.ADD_NEIGHBOUR:
-                db.inicializaVizinho(msgr_ip)
+                threading.Thread(target=db.inicializaVizinho, args=(msgr_ip,)).start()
                 msg_resp = Message(Message.RESP_NEIGHBOUR, db.get_my_ip(msgr_ip), "")
                 sckt.sendto(msg_resp.serialize(), (msgr_ip, ROUTERS_RECEIVER_PORT))
             elif typeOfMsg == Message.RESP_NEIGHBOUR:
-                db.inicializaVizinho(msgr_ip)
+                threading.Thread(target=db.inicializaVizinho, args=(msgr_ip,)).start()
+            elif typeOfMsg == Message.VIDEO_METRIC:
+                data = msg.parseStringfy(msg.getData())
+                threading.Thread(target=db.update_metrics, args=(msg,)).start()
         except Exception as e:
             print("Error in listener: ", e)
             break
