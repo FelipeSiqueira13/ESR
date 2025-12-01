@@ -9,12 +9,21 @@ ROUTERS_RECEIVER_PORT = 40333
 ROUTERS_SENDER_PORT = 40334
 
 
-def stream_request_handler(msg, sdb:sdb):
-    pass
-    
 
-def stream_stop_handler():
-    pass
+
+def stream_request_handler(msg, database: sdb):
+    src = msg.getSrc()
+    stream_id = msg.getData()
+    database.initiate_stream(src, stream_id)
+
+
+
+def stream_stop_handler(msg, database: sdb):
+    src = msg.getSrc()
+    stream_id = msg.getData()
+    database.end_stream(src, stream_id)
+
+
 
 
 # =============================================================
