@@ -10,6 +10,7 @@ class Message:
     ADD_NEIGHBOUR = 6
     REMOVE_NEIGHBOUR = 7
     RESP_NEIGHBOUR = 8
+    MM = 9
 
     def __init__(self, type,src,data:str=""):
         self.mytype = type    

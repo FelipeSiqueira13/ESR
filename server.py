@@ -1,7 +1,11 @@
 import threading
 import socket
+import sys
 from server_database import ServerDataBase as sdb
 from msg import Message
+from VideoStream import VideoStream
+import time
+import json
 
 RECEIVER_PORT = 40331
 SENDER_PORT = 40332
@@ -51,7 +55,32 @@ def listener(sdb:sdb):
     sckt.close()
 
 def sender(sdb:sdb):
-    pass
+    sckt = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    streams_active = {}
+    while True:
+        try:
+            for stream_id, viz in sdb.stream_vizinhos.items():
+                if stream_id not in streams_active:
+                    path = sdb.server_streams.get(stream_id) #vai buscar caminho do video da stream a transmitir
+                    streams_active[stream_id] = VideoStream(path)
+
+                vs = streams_active.get(stream_id)
+                frame = vs.nextFrame()
+
+                for vizinho in viz:
+                    src = sdb.get_my_ip(vizinho)
+                    #Tranformação da data em string
+                    msg_data = {"stream_id": stream_id, "frame": frame}
+                    #Construção da mensagem
+                    msg_frame = Message(Message.MM, src, json.dumps(msg_data))
+
+                    sckt.sendto(msg_frame.serialize(), (vizinho, SENDER_PORT))
+            time.sleep(0.03333)
+        except Exception as e:
+            print("Error in listener: ", e)
+            break
+    sckt.close()   
 
 
 def cntrl(sdb:sdb):
