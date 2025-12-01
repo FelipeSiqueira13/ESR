@@ -35,8 +35,8 @@ def get_available_streams(node_host, node_port, clientName):
             source = get_client_ip(clientName)
 
             #Enviar pedido de streams disponiveis
-            request_message = Message(Message.STREAMS_AVAILABLE, source, "")
-            s.send(request_message.encode())
+            msg = Message(Message.STREAMS_AVAILABLE, source, "")
+            send_message(msg, source, node_port)
 
             #Receber resposta com streams disponiveis
             response_data = s.recv(1024)
@@ -62,8 +62,8 @@ def requestStream(node_host, node_port, client_name, stream_number):
             source = get_client_ip(client_name)
 
             #Enviar pedido de stream
-            request_message = Message(Message.STREAM_REQUEST, source, stream_number)
-            s.send(request_message.encode())
+            msg = Message(Message.STREAM_REQUEST, source, stream_number)
+            send_message(msg, source, node_port)
 
             #Receber resposta
             response_data = s.recv(1024)
