@@ -45,6 +45,15 @@ class Message:
     def encode(self) -> bytes:
         return self.serialize()
 
+    def metrics_encode(self, streams_id:list, id:int) -> bytes:
+        now = dt.datetime.now()
+        self.data = self.stringfy(streams_id, now, id)
+        return self.serialize()
+    
+    def metrics_decode(self):
+        streams_id, now, id = self.parseStringfy(self.data)
+        return streams_id, now, id
+
     @staticmethod
     def decode(data: bytes):
         return Message.deserialize(data)
