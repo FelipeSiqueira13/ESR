@@ -93,6 +93,11 @@ class DataBase():
                 print(f"ERROR: Stream {stream_id} cannot be activated for {viz}.\n")
             return is_stream_active
 
+    def get_streams(self):
+        with self.lock:
+            """Retorna lista de ids streams"""
+            return list(self.available_streams)
+
     def deactivateStream(self, viz, stream_id):
         with self.lock:
             is_stream_active = False
@@ -153,22 +158,22 @@ class DataBase():
 if __name__ == '__main__':
     if len(sys.argv) < 2:
         db = DataBase("R1")   # alterar depois no trabalho final
+
+        print(list(db.get_vizinhos()))
+        print(db.get_my_ip(list(db.get_vizinhos())[0]))
+
+        # testes antigos
+        db.printActiveStreamsTable()
+        db.addStream("s1", "10.0.0.10")
+        db.addStream("s2", "10.0.1.2")
+        db.addStream("s3", "10.0.1.2")
+
+        db.printActiveStreamsTable()
+
+        db.activateStream("10.0.1.2", "s1")
+        db.activateStream("10.0.2.2", "s2")
+        db.activateStream("10.0.2.2", "s3")
+
+        db.printActiveStreamsTable()
     else:
         db = DataBase(sys.argv[1])
-
-    print(list(db.get_vizinhos()))
-    print(db.get_my_ip(list(db.get_vizinhos())[0]))
-
-    # testes antigos
-    db.printActiveStreamsTable()
-    db.addStream("s1", "10.0.0.10")
-    db.addStream("s2", "10.0.0.10")
-    db.addStream("s3", "10.0.0.10")
-
-    db.printActiveStreamsTable()
-
-    db.activateStream("10.0.4.21", "s1")
-    db.activateStream("10.0.4.20", "s2")
-    db.activateStream("10.0.4.20", "s3")
-
-    db.printActiveStreamsTable()

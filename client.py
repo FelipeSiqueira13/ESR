@@ -26,52 +26,54 @@ def get_client_ip(clientName):
         return None
 
 
+def send_udp_request(node_host, node_port, msg: Message):
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.settimeout(5)
+        s.sendto(msg.serialize(), (node_host, node_port))
+        try:
+            data, _ = s.recvfrom(4096)
+        except socket.timeout:
+            print("Timeout waiting for response from node.")
+            return None
+    return Message.deserialize(data)
+
+
 def get_available_streams(node_host, node_port, clientName):
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(5)
-            s.connect((node_host, node_port))
+        source = get_client_ip(clientName)
+        if not source:
+            print("Client IP not found in config.")
+            return []
 
-            source = get_client_ip(clientName)
+        msg = Message(Message.STREAMS_AVAILABLE, source, "")
+        response_message = send_udp_request(node_host, node_port, msg)
+        if not response_message:
+            return []
 
-            #Enviar pedido de streams disponiveis
-            msg = Message(Message.STREAMS_AVAILABLE, source, "")
-            send_message(msg, source, node_port)
-
-            #Receber resposta com streams disponiveis
-            response_data = s.recv(1024)
-            response_message = Message.decode(response_data)
-
-            try:
-                streams = response_message.data.split(",")
-                streams = [stream.strip() for stream in streams if stream.strip()]
-                return streams
-            except Exception as e:
-                print("Error parsing streams from response:", e)
-                return []
+        streams_raw = response_message.data.strip()
+        if not streams_raw or streams_raw == "No streams available":
+            return []
+        return [stream.strip() for stream in streams_raw.split(",") if stream.strip()]
     except Exception as e:
-        print("Error connecting to node:", e)
+        print("Error retrieving streams:", e)
         return []
+
 
 def requestStream(node_host, node_port, client_name, stream_number):
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(5)
-            s.connect((node_host, node_port))
+        source = get_client_ip(client_name)
+        if not source:
+            print("Client IP not found in config.")
+            return "Client IP not found."
 
-            source = get_client_ip(client_name)
-
-            #Enviar pedido de stream
-            msg = Message(Message.STREAM_REQUEST, source, stream_number)
-            send_message(msg, source, node_port)
-
-            #Receber resposta
-            response_data = s.recv(1024)
-            response_message = Message.decode(response_data)
-            return response_message.data
+        msg = Message(Message.STREAM_REQUEST, source, stream_number)
+        response_message = send_udp_request(node_host, node_port, msg)
+        if not response_message:
+            return "No response from node."
+        return response_message.data
     except Exception as e:
         print("Error requesting stream:", e)
-        return []
+        return "Request failed."
 
 def main():
     if len(sys.argv) < 2:
@@ -102,18 +104,13 @@ def main():
 
     while True:
         try:
-            stream_choice = input("Select a stream by number (or 'quit' to exit): ")
+            stream_choice = input("Select a stream by name (or 'quit' to exit): ")
             if stream_choice.lower() == 'quit':
                 print("Exiting.")
                 break
 
-            if not stream_choice.isdigit() or int(stream_choice) < 1 or int(stream_choice) > len(streams):
-                print("Invalid choice. Please try again.")
-                continue
-
-            choice_num = stream_choice
-            print(f"Requesting stream: {choice_num}")
-            response = requestStream(node_host, node_port, clientName, choice_num)
+            print(f"Requesting stream: {stream_choice}")
+            response = requestStream(node_host, node_port, clientName, stream_choice)
             print("Response from node:", response)
         except KeyboardInterrupt:
             print("\nExiting.")

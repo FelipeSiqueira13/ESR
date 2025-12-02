@@ -3,7 +3,6 @@ import sys
 import threading
 import queue
 from database import DataBase
-from server_database import DataBase as sdb
 from msg import Message
 
 RECEIVER_PORT = 40331
@@ -45,7 +44,7 @@ def stream_stop_handler(stream_id, db:DataBase):
         send_message(msg, streamOrigin, RECEIVER_PORT)
     
 def streams_available_handler(msg, db:DataBase):
-    streams = sdb.get_streams() # depois tirar o sbd 
+    streams = db.get_streams() # depois tirar o sbd 
     data = ",".join(streams)
     if data == "":
         data = "No streams available"
