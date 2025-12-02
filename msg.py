@@ -1,5 +1,4 @@
 import datetime as dt
-import pickle
 
 class Message:
     STREAM_REQUEST = 1

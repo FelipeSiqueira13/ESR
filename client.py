@@ -63,7 +63,6 @@ def requestStream(node_host, node_port, client_name, stream_number):
     try:
         source = get_client_ip(client_name)
         if not source:
-            print("Client IP not found in config.")
             return "Client IP not found."
 
         msg = Message(Message.STREAM_REQUEST, source, stream_number)
