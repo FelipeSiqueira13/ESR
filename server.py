@@ -107,6 +107,20 @@ def cntrl(sdb:ServerDataBase):
     sckt.close()
 
 
+def metric_updater(sdb:ServerDataBase):
+    while True:
+        try:
+            time.sleep(10)
+            streams_viz = sdb.get_streams_vizinhos()
+            for stream_id, vizinhos in streams_viz.items():
+                metric = sdb.calculate_metric(stream_id, vizinhos)
+                for viz in vizinhos:
+                    sdb.update_metrics(stream_id, metric, viz)
+        except Exception as e:
+            print("Error in metric updater: ", e)
+            break
+
+
 def main():
     sdb = ServerDataBase(sys.argv[1])
     print("Server started.\n")
