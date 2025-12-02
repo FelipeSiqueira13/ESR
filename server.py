@@ -1,7 +1,7 @@
 import threading
 import socket
 import sys
-from server_database import ServerDataBase as sdb
+from server_database import ServerDataBase
 from msg import Message
 from VideoStream import VideoStream
 import time
@@ -15,14 +15,14 @@ ROUTERS_SENDER_PORT = 40334
 
 
 
-def stream_request_handler(msg, database: sdb):
+def stream_request_handler(msg, database: ServerDataBase):
     src = msg.getSrc()
     stream_id = msg.getData()
     database.initiate_stream(src, stream_id)
 
 
 
-def stream_stop_handler(msg, database: sdb):
+def stream_stop_handler(msg, database: ServerDataBase):
     src = msg.getSrc()
     stream_id = msg.getData()
     database.end_stream(src, stream_id)
@@ -34,7 +34,7 @@ def stream_stop_handler(msg, database: sdb):
 #                      ROUTER THREADS
 # =============================================================
 
-def listener(sdb:sdb):
+def listener(sdb:ServerDataBase):
     sckt = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sckt.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sckt.bind(('', RECEIVER_PORT))
@@ -55,7 +55,7 @@ def listener(sdb:sdb):
             break
     sckt.close()
 
-def sender(sdb:sdb):
+def sender(sdb:ServerDataBase):
     sckt = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     streams_active = {}
@@ -84,7 +84,7 @@ def sender(sdb:sdb):
     sckt.close()   
 
 
-def cntrl(sdb:sdb):
+def cntrl(sdb:ServerDataBase):
     sckt = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sckt.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sckt.bind(('', ROUTERS_RECEIVER_PORT))
@@ -108,7 +108,8 @@ def cntrl(sdb:sdb):
 
 
 def main():
-    sdb = sdb()
+    sdb = ServerDataBase(sys.argv[1])
+    print("Server started.\n")
     thread_listen = threading.Thread(target=listener, args=(sdb,))
     thread_sender = threading.Thread(target=sender, args=(sdb,))
     thread_cntrl = threading.Thread(target=cntrl, args=(sdb,))

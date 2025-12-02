@@ -18,7 +18,7 @@ class DataBase():
         self.ip_to_viz = {ip: (v if isinstance(v, list) else [v]) for ip, v in raw.items()}
         self.lock = threading.Lock()
 
-        print("Vizinhos carregados (ip -> [vizinhos]):", self.ip_to_viz)
+        print("Initialized neighbours (ip -> [neighbours]):", self.ip_to_viz)
 
         # cria lista plana de vizinhos e um mapa viz -> ip para busca reversa
         self.vizinhos = []

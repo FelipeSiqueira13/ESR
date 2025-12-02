@@ -81,7 +81,7 @@ def main():
         sys.exit(1)
 
     clientName = sys.argv[1]
-    print(f"Client {clientName} inicialized")
+    print(f"Client {clientName} initialized")
 
     #Verificar qual node correspondente
     node_host, node_port = get_node_info(clientName)

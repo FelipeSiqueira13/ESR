@@ -13,20 +13,12 @@ class ServerDataBase():
             server_info = json.load(file)
         
         self.server_streams = server_info.get(name, {}).get("streams", {})
-        
+        self.server_vizinhos = {}
+        self.stream_vizinhos = {}
         self.lock = threading.Lock()
 
         with open('config.json', 'r') as file:
             ip_config = json.load(file)
-
-        viz = ip_config.get(name, {})
-        self.server_vizinhos = {}
-        self.stream_vizinhos = {}
-
-        for v in viz:
-            self.server_vizinhos[v] = []
-            
-
     def initiate_stream(self,src,stream_id):
         with self.lock:
             """Adiciona o stream_id ao dicionario de streams_vizinhos"""
