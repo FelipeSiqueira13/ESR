@@ -36,6 +36,7 @@ def stream_stop_handler(msg, database: sdb):
 
 def listener(sdb:sdb):
     sckt = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sckt.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sckt.bind(('', RECEIVER_PORT))
 
     while True:
@@ -85,6 +86,7 @@ def sender(sdb:sdb):
 
 def cntrl(sdb:sdb):
     sckt = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sckt.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sckt.bind(('', ROUTERS_RECEIVER_PORT))
 
     while True:

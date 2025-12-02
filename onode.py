@@ -77,6 +77,7 @@ def update_metrics(streams_id:list, metric, db:DataBase, viz):
 def listener(db:DataBase):
     print("Listener thread started")
     sckt = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sckt.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sckt.bind(('', RECEIVER_PORT))
     while True:
         try:
@@ -120,6 +121,7 @@ def cntrl(db:DataBase):
     avisa os vizinhos, que está ligado, verifica quais estão e quando um é desligado ele percebe com o tempo
     """
     sckt = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sckt.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sckt.bind(('', ROUTERS_RECEIVER_PORT))
     vizinhos = db.get_vizinhos()
     threading.Thread(target=wake_router_handler, args=(vizinhos, db)).start()
