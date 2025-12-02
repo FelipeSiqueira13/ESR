@@ -13,12 +13,23 @@ class ServerDataBase():
             server_info = json.load(file)
         
         self.server_streams = server_info.get(name, {}).get("streams", {})
+        # server_vizinhos: mapeia cada vizinho conhecido para o estado/métricas que mantemos dele
+        # Ex.: {"10.0.0.10": 1, "10.0.1.2": 0}
         self.server_vizinhos = {}
+        # stream_vizinhos: mapeia cada stream ativa para a lista de vizinhos que a estão recebendo
+        # Ex.: {"stream1": ["10.0.0.10", "10.0.1.2"], "stream2": ["10.0.3.1"]}
         self.stream_vizinhos = {}
         self.lock = threading.Lock()
 
         with open('config.json', 'r') as file:
             ip_config = json.load(file)
+            data = ip_config.get(name, {})
+
+        self.my_ip = list(data.keys())[0] if data else None
+
+        for ip in data.keys():
+            self.server_vizinhos[ip] = 0  # Inicializa estado/métricas do vizinho
+
     def initiate_stream(self,src,stream_id):
         with self.lock:
             """Adiciona o stream_id ao dicionario de streams_vizinhos"""
@@ -35,14 +46,13 @@ class ServerDataBase():
                     if not self.stream_vizinhos[stream_id]:
                         del self.stream_vizinhos[stream_id]
     
+    def get_streams_vizinhos(self):
+        with self.lock:
+            """Retorna o dicionario de streams_vizinhos"""
+            return self.stream_vizinhos.keys()
 
     def get_my_ip(self, vizinho_ip):
-        with self.lock:
-            """Retorna o proprio ip do servidor"""
-            for ip in self.server_vizinhos.keys():
-                if ip == vizinho_ip:
-                    return ip
-            return None
+        return self.my_ip
 
 
     def get_streams(self):

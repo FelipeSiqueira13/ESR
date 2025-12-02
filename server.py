@@ -109,8 +109,8 @@ def cntrl(sdb:ServerDataBase):
 
 def metric_updater(sdb:ServerDataBase):
     while True:
+        time.sleep(0.5)
         try:
-            time.sleep(10)
             streams_viz = sdb.get_streams_vizinhos()
             for stream_id, vizinhos in streams_viz.items():
                 metric = sdb.calculate_metric(stream_id, vizinhos)
