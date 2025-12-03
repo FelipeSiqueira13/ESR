@@ -5,11 +5,13 @@ class Message:
     STREAM_STOP = 2
     STREAMS_AVAILABLE = 3
     RESP_STREAMS_AVAILABLE = 4
-    VIDEO_METRIC = 5
-    ADD_NEIGHBOUR = 6
-    REMOVE_NEIGHBOUR = 7
-    RESP_NEIGHBOUR = 8
-    MM = 9
+    VIDEO_METRIC_REQUEST = 5
+    VIDEO_METRIC_RESPONSE = 6
+    VIDEO_METRIC_UPDATE = 7
+    ADD_NEIGHBOUR = 8
+    REMOVE_NEIGHBOUR = 9
+    RESP_NEIGHBOUR = 10
+    MM = 11
 
     def __init__(self, type,src,data:str=""):
         self.mytype = type    
