@@ -51,9 +51,9 @@ def listener(sdb:ServerDataBase):
                                 typeOfMsg = msg.getType()
 
                                 if typeOfMsg == Message.STREAM_REQUEST:
-                                    threading.Thread(target=stream_request_handler, args=(msg, sdb)).start()
+                                    threading.Thread(target=stream_request_handler, args=(msg, sdb), daemon=True).start()
                                 elif typeOfMsg == Message.STREAM_STOP:
-                                    threading.Thread(target=stream_stop_handler, args=(msg, sdb)).start()
+                                    threading.Thread(target=stream_stop_handler, args=(msg, sdb), daemon=True).start()
                 except Exception as e:
                     print(f"Error handling connection: {e}")
                 finally:
@@ -62,7 +62,6 @@ def listener(sdb:ServerDataBase):
             threading.Thread(target=handle_connection, daemon=True).start()
         except Exception as e:
             print(f"Error in listener: {e}")
-            break
     sckt.close()
 
 def sender(sdb:ServerDataBase):
@@ -79,22 +78,27 @@ def sender(sdb:ServerDataBase):
                 if stream_id not in streams_active:
                     path = sdb.server_streams.get(stream_id)
                     if path:
-                        streams_active[stream_id] = VideoStream(path)
+                        try:
+                            streams_active[stream_id] = VideoStream(path)
+                        except Exception as e:
+                            print(f"Error loading VideoStream for {stream_id}: {e}")
+                            continue
 
                 vs = streams_active.get(stream_id)
                 if vs:
-                    frame = vs.nextFrame()
-
-                    for vizinho in viz:
-                        src = sdb.get_my_ip(vizinho)
-                        msg_data = {"stream_id": stream_id, "frame": frame}
-                        msg_frame = Message(Message.MM, src, json.dumps(msg_data))
-                        sckt.sendto(msg_frame.serialize(), (vizinho, SENDER_PORT))
+                    try:
+                        frame = vs.nextFrame()
+                        for vizinho in viz:
+                            src = sdb.get_my_ip(vizinho)
+                            msg_data = {"stream_id": stream_id, "frame": frame}
+                            msg_frame = Message(Message.MM, src, json.dumps(msg_data))
+                            sckt.sendto(msg_frame.serialize(), (vizinho, SENDER_PORT))
+                    except Exception as e:
+                        print(f"Error sending frame for {stream_id}: {e}")
             
             time.sleep(0.03333)
         except Exception as e:
             print(f"Error in sender: {e}")
-            break
     sckt.close()
 
 def cntrl(sdb:ServerDataBase):
@@ -123,11 +127,11 @@ def cntrl(sdb:ServerDataBase):
                                 msgr_ip = msg.getSrc()
                                 typeOfMsg = msg.getType() 
                                 if typeOfMsg == Message.ADD_NEIGHBOUR:
-                                    threading.Thread(target=sdb.inicializaVizinho, args=(msgr_ip,)).start()
+                                    sdb.inicializaVizinho(msgr_ip)
                                     msg_resp = Message(Message.RESP_NEIGHBOUR, sdb.get_my_ip(msgr_ip), "")
                                     conn.sendall(msg_resp.serialize() + b'\n')
                                 elif typeOfMsg == Message.RESP_NEIGHBOUR:
-                                    threading.Thread(target=sdb.inicializaVizinho, args=(msgr_ip,)).start()
+                                    sdb.inicializaVizinho(msgr_ip)
                 except Exception as e:
                     print(f"Error in router connection: {e}")
                 finally:
@@ -136,7 +140,6 @@ def cntrl(sdb:ServerDataBase):
             threading.Thread(target=handle_router_connection, daemon=True).start()
         except Exception as e:
             print(f"Error in control listener: {e}")
-            break
     sckt.close()
 
 
