@@ -12,29 +12,20 @@ SENDER_PORT = 40332
 ROUTERS_RECEIVER_PORT = 40333
 ROUTERS_SENDER_PORT = 40334
 
-
-
-
 def stream_request_handler(msg, database: ServerDataBase):
     src = msg.getSrc()
     stream_id = msg.getData()
     database.initiate_stream(src, stream_id)
-
-
+    print(f"Stream {stream_id} requested by {src}")
 
 def stream_stop_handler(msg, database: ServerDataBase):
     src = msg.getSrc()
     stream_id = msg.getData()
     database.end_stream(src, stream_id)
-
-
-
-
-# =============================================================
-#                      ROUTER THREADS
-# =============================================================
+    print(f"Stream {stream_id} stopped for {src}")
 
 def listener(sdb:ServerDataBase):
+    print("Listener thread started")
     sckt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sckt.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sckt.bind(('', RECEIVER_PORT))
@@ -64,46 +55,50 @@ def listener(sdb:ServerDataBase):
                                 elif typeOfMsg == Message.STREAM_STOP:
                                     threading.Thread(target=stream_stop_handler, args=(msg, sdb)).start()
                 except Exception as e:
-                    print("Error handling connection: ", e)
+                    print(f"Error handling connection: {e}")
                 finally:
                     conn.close()
             
             threading.Thread(target=handle_connection, daemon=True).start()
         except Exception as e:
-            print("Error in listener: ", e)
+            print(f"Error in listener: {e}")
             break
     sckt.close()
 
 def sender(sdb:ServerDataBase):
+    print("Sender thread started")
     sckt = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     streams_active = {}
     while True:
         try:
-            for stream_id, viz in sdb.stream_vizinhos.items():
+            with sdb.lock:
+                stream_viz_copy = dict(sdb.stream_vizinhos)
+            
+            for stream_id, viz in stream_viz_copy.items():
                 if stream_id not in streams_active:
-                    path = sdb.server_streams.get(stream_id) #vai buscar caminho do video da stream a transmitir
-                    streams_active[stream_id] = VideoStream(path)
+                    path = sdb.server_streams.get(stream_id)
+                    if path:
+                        streams_active[stream_id] = VideoStream(path)
 
                 vs = streams_active.get(stream_id)
-                frame = vs.nextFrame()
+                if vs:
+                    frame = vs.nextFrame()
 
-                for vizinho in viz:
-                    src = sdb.get_my_ip(vizinho)
-                    #Tranformação da data em string
-                    msg_data = {"stream_id": stream_id, "frame": frame}
-                    #Construção da mensagem
-                    msg_frame = Message(Message.MM, src, json.dumps(msg_data))
-
-                    sckt.sendto(msg_frame.serialize(), (vizinho, SENDER_PORT))
+                    for vizinho in viz:
+                        src = sdb.get_my_ip(vizinho)
+                        msg_data = {"stream_id": stream_id, "frame": frame}
+                        msg_frame = Message(Message.MM, src, json.dumps(msg_data))
+                        sckt.sendto(msg_frame.serialize(), (vizinho, SENDER_PORT))
+            
             time.sleep(0.03333)
         except Exception as e:
-            print("Error in listener: ", e)
+            print(f"Error in sender: {e}")
             break
-    sckt.close()   
-
+    sckt.close()
 
 def cntrl(sdb:ServerDataBase):
+    print("Control thread started")
     sckt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sckt.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sckt.bind(('', ROUTERS_RECEIVER_PORT))
@@ -134,13 +129,13 @@ def cntrl(sdb:ServerDataBase):
                                 elif typeOfMsg == Message.RESP_NEIGHBOUR:
                                     threading.Thread(target=sdb.inicializaVizinho, args=(msgr_ip,)).start()
                 except Exception as e:
-                    print("Error in router connection: ", e)
+                    print(f"Error in router connection: {e}")
                 finally:
                     conn.close()
             
             threading.Thread(target=handle_router_connection, daemon=True).start()
         except Exception as e:
-            print("Error in listener: ", e)
+            print(f"Error in control listener: {e}")
             break
     sckt.close()
 
@@ -160,8 +155,13 @@ def metric_updater(sdb:ServerDataBase):
 
 
 def main():
+    if len(sys.argv) < 2:
+        print("Usage: python server.py <server_name>")
+        sys.exit(1)
+        
     sdb = ServerDataBase(sys.argv[1])
-    print("Server started.\n")
+    print(f"Server {sys.argv[1]} started.\n")
+    
     thread_listen = threading.Thread(target=listener, args=(sdb,))
     thread_sender = threading.Thread(target=sender, args=(sdb,))
     thread_cntrl = threading.Thread(target=cntrl, args=(sdb,))
@@ -176,8 +176,6 @@ def main():
 
     for t in all_threads:
         t.join()
-
-
 
 if __name__ == '__main__':
     main()

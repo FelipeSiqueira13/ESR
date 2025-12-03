@@ -1,8 +1,6 @@
 from asyncio import streams
 import json
 import sys
-import msg
-
 import threading
 
 class DataBase():
