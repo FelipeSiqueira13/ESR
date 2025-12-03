@@ -10,6 +10,8 @@ SENDER_PORT = 40332
 ROUTERS_RECEIVER_PORT = 40333
 ROUTERS_SENDER_PORT = 40334
 
+MAX_RETRIES = 3
+
 send_queue = queue.Queue()
 
 def send_message(msg:Message, host:str, port:int):
@@ -76,20 +78,39 @@ def update_metrics(streams_id:list, metric, db:DataBase, viz):
 
 def listener(db:DataBase):
     print("Listener thread started")
-    sckt = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sckt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sckt.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sckt.bind(('', RECEIVER_PORT))
+    sckt.listen(10) #Aceita até 10 conexões em espera
+
     while True:
         try:
-            dados, addr = sckt.recvfrom(4096)
-            msg = Message.deserialize(dados)
-            typeOfMsg = msg.getType() 
-            if typeOfMsg == Message.STREAM_REQUEST:
-                threading.Thread(target=stream_pls_handler, args=(msg, db)).start()
-            elif typeOfMsg == Message.STREAM_STOP:
-                threading.Thread(target=stream_no_handler, args=(msg, db)).start()
-            elif typeOfMsg == Message.STREAMS_AVAILABLE:
-                threading.Thread(target=streams_available_handler, args=(msg, db)).start()
+            conn, addr = sckt.accept()
+
+            def handle_connection():
+                try:
+                    buffer = b''
+                    while True:
+                        chunk = conn.recv(4096)
+                        if not chunk:
+                            break
+                        buffer += chunk
+                        while b'\n' in buffer:
+                            dados, buffer = buffer.split(b'\n',1)
+                            if dados:
+                                msg = Message.deserialize(dados)
+                                typeOfMsg = msg.getType() 
+                                if typeOfMsg == Message.STREAM_REQUEST:
+                                    threading.Thread(target=stream_pls_handler, args=(msg, db)).start()
+                                elif typeOfMsg == Message.STREAM_STOP:
+                                    threading.Thread(target=stream_no_handler, args=(msg, db)).start()
+                                elif typeOfMsg == Message.STREAMS_AVAILABLE:
+                                    threading.Thread(target=streams_available_handler, args=(msg, db)).start()
+                except Exception as e:
+                    print("Error handling connection: ", e)
+                finally:
+                    conn.close()
+            threading.Thread(target=handle_connection, daemon=True).start()
         except Exception as e:
             print("Error in listener: ", e)
             break
@@ -99,47 +120,126 @@ def listener(db:DataBase):
 
 def sender(db:DataBase):
     print("Sender thread started")
-    sckt = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    connection_cache = {}
+    
     while True:
         try:
             msg, host, port = send_queue.get()
-            try:
-                sckt.sendto(msg.serialize(), (host, port))
-            except Exception:
-                # on error try with a fresh socket
-                sckt.close()
-                sckt = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                sckt.sendto(msg.serialize(), (host, port))
+            key = (host, port)
+            success = False
+            
+            for attempt in range(MAX_RETRIES):
+                try:
+
+                    if key in connection_cache and attempt == 0:
+                        sckt = connection_cache[key]
+                        try:
+                            sckt.sendall(msg.serialize() + b'\n')
+                            success = True
+                            break
+                        except Exception:
+                            try:
+                                sckt.close()
+                            except:
+                                pass
+                            del connection_cache[key]
+                    
+                    sckt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sckt.settimeout(5.0)
+                    sckt.connect((host, port))
+                    sckt.sendall(msg.serialize() + b'\n')
+                    connection_cache[key] = sckt
+                    success = True
+                    break
+                    
+                except Exception as e:
+                    if key in connection_cache:
+                        try:
+                            connection_cache[key].close()
+                        except:
+                            pass
+                        del connection_cache[key]
+                    
+                    if attempt < MAX_RETRIES - 1:
+                        print(f"Attempt {attempt + 1} failed for {host}:{port}, retrying...")
+                    else:
+                        print(f"ERROR: Failed to send message to {host}:{port} after {MAX_RETRIES} attempts - {e}")
+                        print(f"Node {host} may be offline.")
+            
+            if not success:
+                print(f"Message to {host}:{port} discarded after {MAX_RETRIES} failed attempts.")
+                    
         except Exception as e:
             print("Error in sender: ", e)
             break
-    sckt.close()
+    
+    for sckt in connection_cache.values():
+        try:
+            sckt.close()
+        except:
+            pass
             
 
 def cntrl(db:DataBase):
     """
     avisa os vizinhos, que está ligado, verifica quais estão e quando um é desligado ele percebe com o tempo
     """
-    sckt = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sckt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sckt.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sckt.bind(('', ROUTERS_RECEIVER_PORT))
+    sckt.listen(10)
+
     vizinhos = db.get_vizinhos()
     threading.Thread(target=wake_router_handler, args=(vizinhos, db)).start()
+
     while True:
         try:
-            dados, addr = sckt.recvfrom(4096)
-            msg = Message.deserialize(dados)
-            msgr_ip = msg.getSrc()
-            typeOfMsg = msg.getType() 
-            if typeOfMsg == Message.ADD_NEIGHBOUR:
-                threading.Thread(target=db.inicializaVizinho, args=(msgr_ip,)).start()
-                msg_resp = Message(Message.RESP_NEIGHBOUR, db.get_my_ip(msgr_ip), "")
-                sckt.sendto(msg_resp.serialize(), (msgr_ip, ROUTERS_RECEIVER_PORT))
-            elif typeOfMsg == Message.RESP_NEIGHBOUR:
-                threading.Thread(target=db.inicializaVizinho, args=(msgr_ip,)).start()
-            elif typeOfMsg == Message.VIDEO_METRIC:
-                data = msg.parseStringfy(msg.getData())
-                threading.Thread(target=db.update_metrics, args=(msg,)).start()
+            conn, addr = sckt.accept()
+            
+            def handle_router_connection():
+                try:
+                    buffer = b''
+                    while True:
+                        chunk = conn.recv(4096)
+                        if not chunk:
+                            break
+                        buffer += chunk
+                        while b'\n' in buffer:
+                            dados, buffer = buffer.split(b'\n', 1)
+                            if dados:
+                                msg = Message.deserialize(dados)
+                                msgr_ip = msg.getSrc()
+                                typeOfMsg = msg.getType()
+                                if typeOfMsg == Message.ADD_NEIGHBOUR:
+                                    threading.Thread(target=db.inicializaVizinho, args=(msgr_ip,)).start()
+                                    msg_resp = Message(Message.RESP_NEIGHBOUR, db.get_my_ip(msgr_ip), "")
+
+                                    success = False
+                                    for attempt in range(MAX_RETRIES):
+                                        try:
+                                            conn.sendall(msg_resp.serialize() + b'\n')
+                                            success = True
+                                            break
+                                        except Exception as e:
+                                            if attempt < MAX_RETRIES - 1:
+                                                print(f"Attempt {attempt + 1} failed to send RESP_NEIGHBOUR to {msgr_ip}, retrying...")
+                                            else:
+                                                print(f"ERROR: Failed to send RESP_NEIGHBOUR to {msgr_ip} after {MAX_RETRIES} attempts - {e}")
+                                    
+                                    if not success:
+                                       print(f"RESP_NEIGHBOUR to {msgr_ip} discarded after {MAX_RETRIES} failed attempts.")
+                                       break 
+                                elif typeOfMsg == Message.RESP_NEIGHBOUR:
+                                    threading.Thread(target=db.inicializaVizinho, args=(msgr_ip,)).start()
+                                elif typeOfMsg == Message.VIDEO_METRIC:
+                                    data = msg.parseStringfy(msg.getData())
+                                    threading.Thread(target=db.update_metrics, args=(msg,)).start()
+                except Exception as e:
+                    print("Error in router connection: ", e)
+                finally:
+                    conn.close()
+            
+            threading.Thread(target=handle_router_connection, daemon=True).start()
         except Exception as e:
             print("Error in listener: ", e)
             break
