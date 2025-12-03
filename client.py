@@ -26,16 +26,37 @@ def get_client_ip(clientName):
         return None
 
 
-def send_udp_request(node_host, node_port, msg: Message):
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+def send_tcp_request(node_host, node_port, msg: Message):
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(5)
-        s.sendto(msg.serialize(), (node_host, node_port))
-        try:
-            data, _ = s.recvfrom(4096)
-        except socket.timeout:
-            print("Timeout waiting for response from node.")
-            return None
-    return Message.deserialize(data)
+
+        s.connect((node_host, node_port))
+
+        s.sendall(msg.serialize() + b'\n')
+
+        buffer = b''
+        while True:
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            buffer += chunk
+
+            if b'\n' in buffer:
+                data, _ = buffer.split(b'\n', 1)
+                s.close()
+                return Message.deserialize(data)
+            
+        s.close()
+        print("Connection closed without receiving complete response")
+        return None
+    
+    except socket.timeout:
+        print("Timeout waiting for response from node.")
+        return None
+    except Exception as e:
+        print(f"Error in TCP request: {e}")
+        return None
 
 
 def get_available_streams(node_host, node_port, clientName):
@@ -46,7 +67,7 @@ def get_available_streams(node_host, node_port, clientName):
             return []
 
         msg = Message(Message.STREAMS_AVAILABLE, source, "")
-        response_message = send_udp_request(node_host, node_port, msg)
+        response_message = send_tcp_request(node_host, node_port, msg)
         if not response_message:
             return []
 
@@ -66,7 +87,7 @@ def requestStream(node_host, node_port, client_name, stream_number):
             return "Client IP not found."
 
         msg = Message(Message.STREAM_REQUEST, source, stream_number)
-        response_message = send_udp_request(node_host, node_port, msg)
+        response_message = send_tcp_request(node_host, node_port, msg)
         if not response_message:
             return "No response from node."
         return response_message.data
