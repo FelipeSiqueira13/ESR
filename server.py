@@ -35,21 +35,40 @@ def stream_stop_handler(msg, database: ServerDataBase):
 # =============================================================
 
 def listener(sdb:ServerDataBase):
-    sckt = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sckt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sckt.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sckt.bind(('', RECEIVER_PORT))
+    sckt.listen(10)
 
     while True:
         try:
-            data, addr = sckt.recvfrom(4096)
-            msg = Message.deserialize(data)
-            msgr_ip = msg.getSrc()
-            typeOfMsg = msg.getType()
+            conn, addr = sckt.accept()
+            
+            def handle_connection():
+                try:
+                    buffer = b''
+                    while True:
+                        chunk = conn.recv(4096)
+                        if not chunk:
+                            break
+                        buffer += chunk
+                        while b'\n' in buffer:
+                            dados, buffer = buffer.split(b'\n', 1)
+                            if dados:
+                                msg = Message.deserialize(dados)
+                                msgr_ip = msg.getSrc()
+                                typeOfMsg = msg.getType()
 
-            if typeOfMsg == Message.STREAM_REQUEST:
-                threading.Thread(target=stream_request_handler, args=(msg, sdb)).start()
-            elif typeOfMsg == Message.STREAM_STOP:
-                threading.Thread(target=stream_stop_handler, args=(msg, sdb)).start()
+                                if typeOfMsg == Message.STREAM_REQUEST:
+                                    threading.Thread(target=stream_request_handler, args=(msg, sdb)).start()
+                                elif typeOfMsg == Message.STREAM_STOP:
+                                    threading.Thread(target=stream_stop_handler, args=(msg, sdb)).start()
+                except Exception as e:
+                    print("Error handling connection: ", e)
+                finally:
+                    conn.close()
+            
+            threading.Thread(target=handle_connection, daemon=True).start()
         except Exception as e:
             print("Error in listener: ", e)
             break
@@ -85,22 +104,41 @@ def sender(sdb:ServerDataBase):
 
 
 def cntrl(sdb:ServerDataBase):
-    sckt = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sckt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sckt.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sckt.bind(('', ROUTERS_RECEIVER_PORT))
+    sckt.listen(10)
 
     while True:
         try:
-            data, addr = sckt.recvfrom(4096)
-            msg = Message.deserialize(data)
-            msgr_ip = msg.getSrc()
-            typeOfMsg = msg.getType() 
-            if typeOfMsg == Message.ADD_NEIGHBOUR:
-                threading.Thread(target=sdb.inicializaVizinho, args=(msgr_ip,)).start()
-                msg_resp = Message(Message.RESP_NEIGHBOUR, sdb.get_my_ip(msgr_ip), "")
-                sckt.sendto(msg_resp.serialize(), (msgr_ip, ROUTERS_RECEIVER_PORT))
-            elif typeOfMsg == Message.RESP_NEIGHBOUR:
-                threading.Thread(target=sdb.inicializaVizinho, args=(msgr_ip,)).start()
+            conn, addr = sckt.accept()
+            
+            def handle_router_connection():
+                try:
+                    buffer = b''
+                    while True:
+                        chunk = conn.recv(4096)
+                        if not chunk:
+                            break
+                        buffer += chunk
+                        while b'\n' in buffer:
+                            dados, buffer = buffer.split(b'\n', 1)
+                            if dados:
+                                msg = Message.deserialize(dados)
+                                msgr_ip = msg.getSrc()
+                                typeOfMsg = msg.getType() 
+                                if typeOfMsg == Message.ADD_NEIGHBOUR:
+                                    threading.Thread(target=sdb.inicializaVizinho, args=(msgr_ip,)).start()
+                                    msg_resp = Message(Message.RESP_NEIGHBOUR, sdb.get_my_ip(msgr_ip), "")
+                                    conn.sendall(msg_resp.serialize() + b'\n')
+                                elif typeOfMsg == Message.RESP_NEIGHBOUR:
+                                    threading.Thread(target=sdb.inicializaVizinho, args=(msgr_ip,)).start()
+                except Exception as e:
+                    print("Error in router connection: ", e)
+                finally:
+                    conn.close()
+            
+            threading.Thread(target=handle_router_connection, daemon=True).start()
         except Exception as e:
             print("Error in listener: ", e)
             break
