@@ -48,13 +48,13 @@ def stream_no_handler(msg:Message, db:DataBase):
 def stream_request_handler(stream_id, db:DataBase):
     streamOrigin = db.getStreamSource(stream_id)
     if streamOrigin:
-        msg = Message(Message.STREAM_PLS, db.get_my_ip(streamOrigin), stream_id)
+        msg = Message(Message.STREAM_REQUEST, db.get_my_ip(streamOrigin), stream_id)
         send_message(msg, streamOrigin, RECEIVER_PORT)
 
 def stream_stop_handler(stream_id, db:DataBase):
     streamOrigin = db.getStreamSource(stream_id)
     if streamOrigin:
-        msg = Message(Message.VIDEO_NO, db.get_my_ip(streamOrigin), stream_id)
+        msg = Message(Message.STREAM_STOP, db.get_my_ip(streamOrigin), stream_id)
         send_message(msg, streamOrigin, RECEIVER_PORT)
     
 def streams_available_handler(msg, db:DataBase):
@@ -166,19 +166,18 @@ def metric_response_handler(msg: Message, db: DataBase):
     streams = stored.get("streams", [])
     db.AtualizaMetricas(msg.getSrc(), streams, total_delay_ms)
     
-    # Prepara resposta com delay acumulado
-    response_payload = {
-        "request_id": request_id,
-        "streams": payload.get("streams", []),
-        "start_time": payload.get("start_time"),
-        "accumulated_delay_ms": total_delay_ms
-    }
-    
+    # Usa metrics_encode em vez de json.dumps diretamente
     update_msg = Message(
         Message.VIDEO_METRIC_RESPONSE, 
-        db.get_my_ip(stored["src"]), 
-        json.dumps(response_payload)
+        db.get_my_ip(stored["src"])
     )
+    update_msg.metrics_encode(
+        payload.get("streams", []),
+        request_id=request_id,
+        start_time=payload.get("start_time"),
+        accumulated_delay_ms=total_delay_ms
+    )
+    
     send_message(update_msg, stored["src"], ROUTERS_RECEIVER_PORT)
     
     db.remove_metric_request(request_id)
