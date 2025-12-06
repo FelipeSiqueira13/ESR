@@ -64,8 +64,9 @@ class ServerDataBase():
 
     def inicializaVizinho(self, ip):
         with self.lock:
-            if ip in self.server_vizinhos:
-                self.server_vizinhos[ip] = 1
+            if ip not in self.server_vizinhos:
+                self.server_vizinhos[ip] = 0
+            self.server_vizinhos[ip] = 1
 
     def get_streams_for_neighbor(self, vizinho):
         with self.lock:
