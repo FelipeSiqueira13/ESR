@@ -185,11 +185,12 @@ def metric_updater(sdb:ServerDataBase):
     while True:
         try:
             awake_neighbors = sdb.get_awake_neighbors()
+            print(awake_neighbors)
             for viz in awake_neighbors:
                 streams = sdb.get_streams_for_neighbor(viz)
                 if not streams:
                     continue
-                start_time = dt.datetime.utcnow()
+                start_time = dt.datetime.now()
                 request_id = f"req-{uuid.uuid4().hex[:10]}"
                 sdb.register_metric_request(request_id, viz, streams, start_time)
                 print(f"[SERVER][METRIC_REQ] to={viz} streams={streams} request_id={request_id}")
