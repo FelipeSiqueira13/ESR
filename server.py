@@ -1,6 +1,8 @@
 import threading
 import socket
 import sys
+import datetime as dt
+import uuid
 from server_database import ServerDataBase
 from msg import Message
 from VideoStream import VideoStream
@@ -11,6 +13,16 @@ RECEIVER_PORT = 40331
 SENDER_PORT = 40332
 ROUTERS_RECEIVER_PORT = 40333
 ROUTERS_SENDER_PORT = 40334
+METRIC_INTERVAL_SECONDS = 5
+
+def _send_buffer(sock: socket.socket, payload: bytes):
+    view = memoryview(payload)
+    total_sent = 0
+    while total_sent < len(view):
+        sent = sock.send(view[total_sent:])
+        if sent == 0:
+            raise ConnectionError("Socket connection broken")
+        total_sent += sent
 
 def stream_request_handler(msg, database: ServerDataBase):
     src = msg.getSrc()
@@ -47,7 +59,6 @@ def listener(sdb:ServerDataBase):
                             dados, buffer = buffer.split(b'\n', 1)
                             if dados:
                                 msg = Message.deserialize(dados)
-                                msgr_ip = msg.getSrc()
                                 typeOfMsg = msg.getType()
 
                                 if typeOfMsg == Message.STREAM_REQUEST:
@@ -129,9 +140,23 @@ def cntrl(sdb:ServerDataBase):
                                 if typeOfMsg == Message.ADD_NEIGHBOUR:
                                     sdb.inicializaVizinho(msgr_ip)
                                     msg_resp = Message(Message.RESP_NEIGHBOUR, sdb.get_my_ip(msgr_ip), "")
-                                    conn.sendall(msg_resp.serialize() + b'\n')
+                                    _send_buffer(conn, msg_resp.serialize() + b'\n')
                                 elif typeOfMsg == Message.RESP_NEIGHBOUR:
                                     sdb.inicializaVizinho(msgr_ip)
+                                elif typeOfMsg == Message.VIDEO_METRIC_RESPONSE:
+                                    resp = Message(Message.VIDEO_METRIC_RESPONSE, sdb.get_my_ip(msgr_ip), msg.getData())
+                                    send_control_message(msgr_ip, resp)
+                                elif typeOfMsg == Message.VIDEO_METRIC_UPDATE:
+                                    try:
+                                        payload = json.loads(msg.getData() or "{}")
+                                    except json.JSONDecodeError:
+                                        print("Invalid VIDEO_METRIC_UPDATE payload received.")
+                                        continue
+                                    streams = payload.get("streams", [])
+                                    delay_ms = payload.get("delay_ms")
+                                    request_id = payload.get("request_id")
+                                    if streams and delay_ms is not None:
+                                        sdb.record_metric(msgr_ip, streams, delay_ms, request_id)
                 except Exception as e:
                     print(f"Error in router connection: {e}")
                 finally:
@@ -143,19 +168,32 @@ def cntrl(sdb:ServerDataBase):
     sckt.close()
 
 
+def send_control_message(host, message: Message):
+    try:
+        with socket.create_connection((host, ROUTERS_RECEIVER_PORT), timeout=5) as ctrl:
+            _send_buffer(ctrl, message.serialize() + b'\n')
+    except Exception as e:
+        print(f"Failed to send control message to {host}: {e}")
+
 def metric_updater(sdb:ServerDataBase):
+    print("Metric updater thread started")
     while True:
-        time.sleep(0.5)
         try:
-            streams_viz = sdb.get_streams_vizinhos()
-            for stream_id, vizinhos in streams_viz.items():
-                metric = sdb.calculate_metric(stream_id, vizinhos)
-                for viz in vizinhos:
-                    sdb.update_metrics(stream_id, metric, viz)
+            awake_neighbors = sdb.get_awake_neighbors()
+            for viz in awake_neighbors:
+                streams = sdb.get_streams_for_neighbor(viz)
+                if not streams:
+                    continue
+                start_time = dt.datetime.utcnow()
+                request_id = f"req-{uuid.uuid4().hex[:10]}"
+                sdb.register_metric_request(request_id, viz, streams, start_time)
+                msg = Message(Message.VIDEO_METRIC_REQUEST, sdb.get_my_ip(viz))
+                msg.metrics_encode(streams, request_id=request_id, start_time=start_time)
+                send_control_message(viz, msg)
         except Exception as e:
             print("Error in metric updater: ", e)
-            break
-
+        finally:
+            time.sleep(METRIC_INTERVAL_SECONDS)
 
 def main():
     if len(sys.argv) < 2:
@@ -168,8 +206,9 @@ def main():
     thread_listen = threading.Thread(target=listener, args=(sdb,))
     thread_sender = threading.Thread(target=sender, args=(sdb,))
     thread_cntrl = threading.Thread(target=cntrl, args=(sdb,))
+    thread_metrics = threading.Thread(target=metric_updater, args=(sdb,))
 
-    all_threads = [thread_listen, thread_sender, thread_cntrl]
+    all_threads = [thread_listen, thread_sender, thread_cntrl, thread_metrics]
 
     for t in all_threads:
         t.daemon = True

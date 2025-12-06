@@ -39,6 +39,8 @@ class DataBase():
             self.active_streams_table[viz] = {}
             self.streams_metrics[viz] = {}
 
+        self.pending_metric_requests = {}
+
     def get_vizinhos(self):
         """Retorna apenas os endereços"""
         return list(self.vizinhos)
@@ -148,6 +150,18 @@ class DataBase():
     def printVizinhosInicializados(self):
         for viz, status in self.vizinhos_inicializados.items():
             print(f"{viz}: {status}")
+
+    def store_metric_request(self, request_id, payload):
+        with self.lock:
+            self.pending_metric_requests[request_id] = payload
+
+    def get_metric_request(self, request_id):
+        with self.lock:
+            return self.pending_metric_requests.get(request_id)
+
+    def remove_metric_request(self, request_id):
+        with self.lock:
+            return self.pending_metric_requests.pop(request_id, None)
 
 
 # =============================================================

@@ -1,4 +1,5 @@
 import datetime as dt
+import json
 
 class Message:
     STREAM_REQUEST = 1
@@ -46,14 +47,23 @@ class Message:
     def encode(self) -> bytes:
         return self.serialize()
 
-    def metrics_encode(self, streams_id:list, id:int) -> bytes:
-        now = dt.datetime.now()
-        self.data = self.stringfy(streams_id, now, id)
+    def metrics_encode(self, streams_id: list, request_id: str | None = None, start_time: dt.datetime | None = None) -> bytes:
+        started_at = (start_time or dt.datetime.now()).isoformat()
+        payload = {
+            "request_id": request_id or f"req-{int(dt.datetime.now().timestamp()*1000)}",
+            "streams": streams_id,
+            "start_time": started_at
+        }
+        self.data = json.dumps(payload)
         return self.serialize()
     
     def metrics_decode(self):
-        streams_id, now, id = self.parseStringfy(self.data)
-        return streams_id, now, id
+        payload = json.loads(self.data or "{}")
+        start_time = payload.get("start_time")
+        if start_time:
+            payload["start_time"] = dt.datetime.fromisoformat(start_time)
+        payload.setdefault("streams", [])
+        return payload
 
     @staticmethod
     def decode(data: bytes):

@@ -26,6 +26,15 @@ def get_client_ip(clientName):
         return None
 
 
+def _send_buffer(sock: socket.socket, payload: bytes):
+    view = memoryview(payload)
+    total_sent = 0
+    while total_sent < len(view):
+        sent = sock.send(view[total_sent:])
+        if sent == 0:
+            raise ConnectionError("Socket connection broken")
+        total_sent += sent
+
 def send_tcp_request(node_host, node_port, msg: Message):
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -33,7 +42,7 @@ def send_tcp_request(node_host, node_port, msg: Message):
 
         s.connect((node_host, node_port))
 
-        s.sendall(msg.serialize() + b'\n')
+        _send_buffer(s, msg.serialize() + b'\n')
 
         buffer = b''
         while True:

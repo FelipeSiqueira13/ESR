@@ -8,7 +8,7 @@ class VideoStream:
             pass
         self.frameNum = 0
 
-    def nexFrame(self):
+    def nextFrame(self):
         """Get next frame."""
         data = self.file.read(5) # Get the framelength from the first 5 bits
         if data:
@@ -20,7 +20,7 @@ class VideoStream:
         else:
             # If video is over
             self.restart_stream()
-            return self.nexFrame()
+            return self.nextFrame()
         return data
     
     def restart_stream(self):

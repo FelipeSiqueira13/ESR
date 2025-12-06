@@ -2,6 +2,8 @@ import socket
 import sys
 import threading
 import queue
+import datetime as dt
+import json
 from database import DataBase
 from msg import Message
 
@@ -13,6 +15,15 @@ ROUTERS_SENDER_PORT = 40334
 MAX_RETRIES = 3
 
 send_queue = queue.Queue()
+
+def _send_buffer(sock: socket.socket, payload: bytes):
+    view = memoryview(payload)
+    total_sent = 0
+    while total_sent < len(view):
+        sent = sock.send(view[total_sent:])
+        if sent == 0:
+            raise ConnectionError("Socket connection broken")
+        total_sent += sent
 
 def send_message(msg:Message, host:str, port:int):
     send_queue.put((msg, host, port))
@@ -72,6 +83,58 @@ def update_metrics(streams_id:list, metric, db:DataBase, viz):
     db.AtualizaMetricas(viz, streams_id, metric)
 
 
+def metric_request_handler(msg: Message, db: DataBase):
+    try:
+        payload = msg.metrics_decode()
+    except Exception:
+        return
+    request_id = payload.get("request_id")
+    start_time = payload.get("start_time")
+    if not request_id or not start_time:
+        return
+    db.store_metric_request(request_id, {
+        "start_time": start_time,
+        "streams": payload.get("streams", []),
+        "src": msg.getSrc()
+    })
+    response = Message(Message.VIDEO_METRIC_RESPONSE, db.get_my_ip(msg.getSrc()), msg.getData())
+    send_message(response, msg.getSrc(), ROUTERS_RECEIVER_PORT)
+
+def metric_response_handler(msg: Message, db: DataBase):
+    try:
+        payload = msg.metrics_decode()
+    except Exception:
+        return
+    request_id = payload.get("request_id")
+    if not request_id:
+        return
+    stored = db.get_metric_request(request_id)
+    if not stored:
+        return
+    start_time = stored.get("start_time")
+    if not isinstance(start_time, dt.datetime):
+        return
+    delay_ms = (dt.datetime.now() - start_time).total_seconds() * 1000
+    update_payload = json.dumps({
+        "request_id": request_id,
+        "streams": stored.get("streams", []),
+        "delay_ms": delay_ms
+    })
+    update_msg = Message(Message.VIDEO_METRIC_UPDATE, db.get_my_ip(stored["src"]), update_payload)
+    send_message(update_msg, stored["src"], ROUTERS_RECEIVER_PORT)
+    db.remove_metric_request(request_id)
+
+def metric_update_handler(msg: Message, db: DataBase):
+    try:
+        payload = json.loads(msg.getData() or "{}")
+    except json.JSONDecodeError:
+        return
+    streams = payload.get("streams") or []
+    delay_ms = payload.get("delay_ms")
+    if streams and delay_ms is not None:
+        db.AtualizaMetricas(msg.getSrc(), streams, delay_ms)
+
+
 # =============================================================
 #                      PRINCIPAL THREADS
 # =============================================================
@@ -125,6 +188,7 @@ def sender(db:DataBase):
     while True:
         try:
             msg, host, port = send_queue.get()
+            payload = msg.serialize() + b'\n'
             key = (host, port)
             success = False
             
@@ -147,7 +211,7 @@ def sender(db:DataBase):
                     sckt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     sckt.settimeout(5.0)
                     sckt.connect((host, port))
-                    sckt.sendall(msg.serialize() + b'\n')
+                    _send_buffer(sckt, payload)
                     connection_cache[key] = sckt
                     success = True
                     break
@@ -217,7 +281,7 @@ def cntrl(db:DataBase):
                                     success = False
                                     for attempt in range(MAX_RETRIES):
                                         try:
-                                            conn.sendall(msg_resp.serialize() + b'\n')
+                                            _send_buffer(conn, msg_resp.serialize() + b'\n')
                                             success = True
                                             break
                                         except Exception as e:
@@ -231,9 +295,12 @@ def cntrl(db:DataBase):
                                        break 
                                 elif typeOfMsg == Message.RESP_NEIGHBOUR:
                                     threading.Thread(target=db.inicializaVizinho, args=(msgr_ip,)).start()
-                                elif typeOfMsg == Message.VIDEO_METRIC:
-                                    data = msg.parseStringfy(msg.getData())
-                                    threading.Thread(target=db.update_metrics, args=(msg,)).start()
+                                elif typeOfMsg == Message.VIDEO_METRIC_REQUEST:
+                                    threading.Thread(target=metric_request_handler, args=(msg, db)).start()
+                                elif typeOfMsg == Message.VIDEO_METRIC_RESPONSE:
+                                    threading.Thread(target=metric_response_handler, args=(msg, db)).start()
+                                elif typeOfMsg == Message.VIDEO_METRIC_UPDATE:
+                                    threading.Thread(target=metric_update_handler, args=(msg, db)).start()
                 except Exception as e:
                     print("Error in router connection: ", e)
                 finally:

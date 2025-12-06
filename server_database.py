@@ -1,9 +1,8 @@
 import json
 import sys
 import threading
-# from database import DataBase
-
 import socket
+import datetime as dt
 
 class ServerDataBase():
 
@@ -20,6 +19,8 @@ class ServerDataBase():
         # Ex.: {"stream1": ["10.0.0.10", "10.0.1.2"], "stream2": ["10.0.3.1"]}
         self.stream_vizinhos = {}
         self.lock = threading.Lock()
+        self.pending_metric_requests = {}
+        self.stream_metrics = {}
 
         with open('config.json', 'r') as file:
             ip_config = json.load(file)
@@ -35,7 +36,8 @@ class ServerDataBase():
             """Adiciona o stream_id ao dicionario de streams_vizinhos"""
             if stream_id not in self.stream_vizinhos:
                 self.stream_vizinhos[stream_id] = []
-            self.stream_vizinhos[stream_id].append(src)
+            if src not in self.stream_vizinhos[stream_id]:
+                self.stream_vizinhos[stream_id].append(src)
     
     def end_stream(self,src,stream_id):
         with self.lock:
@@ -48,8 +50,8 @@ class ServerDataBase():
     
     def get_streams_vizinhos(self):
         with self.lock:
-            """Retorna o dicionario de streams_vizinhos"""
-            return self.stream_vizinhos.keys()
+            """Retorna uma cópia do dicionario de streams_vizinhos"""
+            return {stream: list(vizinhos) for stream, vizinhos in self.stream_vizinhos.items()}
 
     def get_my_ip(self, vizinho_ip):
         return self.my_ip
@@ -64,6 +66,35 @@ class ServerDataBase():
         with self.lock:
             if ip in self.server_vizinhos:
                 self.server_vizinhos[ip] = 1
+
+    def get_streams_for_neighbor(self, vizinho):
+        with self.lock:
+            return [stream for stream, vizinhos in self.stream_vizinhos.items() if vizinho in vizinhos]
+
+    def get_awake_neighbors(self):
+        with self.lock:
+            return [viz for viz, status in self.server_vizinhos.items() if status == 1]
+
+    def register_metric_request(self, request_id, vizinho, streams, start_time):
+        with self.lock:
+            self.pending_metric_requests[request_id] = {
+                "neighbor": vizinho,
+                "streams": list(streams),
+                "start_time": start_time
+            }
+
+    def record_metric(self, vizinho, streams, delay_ms, request_id=None):
+        with self.lock:
+            metrics = self.stream_metrics.setdefault(vizinho, {})
+            timestamp = dt.datetime.now().isoformat()
+            for stream in streams:
+                metrics[stream] = {
+                    "delay_ms": delay_ms,
+                    "updated_at": timestamp,
+                    "request_id": request_id
+                }
+            if request_id:
+                self.pending_metric_requests.pop(request_id, None)
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:
