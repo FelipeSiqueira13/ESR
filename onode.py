@@ -195,50 +195,68 @@ def metric_response_handler(msg: Message, db: DataBase):
 
 def metric_update_handler(msg: Message, db: DataBase):
     try:
-        payload = json.loads(msg.getData() or "{}")
-    except json.JSONDecodeError:
-        print("[ONODE][METRIC_UPDATE] Invalid JSON payload")
+        payload = msg.metrics_decode()
+    except Exception as e:
+        print(f"[ONODE][METRIC_UPDATE] Failed to decode: {e}")
         return
     
-    streams = payload.get("streams") or []
-    delay_ms = payload.get("delay_ms")
-    
-    if not streams or delay_ms is None:
-        print("[ONODE][METRIC_UPDATE] Missing streams or delay_ms")
+    if not isinstance(payload, dict):
+        print(f"[ONODE][METRIC_UPDATE] Invalid payload type")
         return
     
-    # Atualiza métricas locais
-    db.AtualizaMetricas(msg.getSrc(), streams, delay_ms)
-    print(f"[ONODE][METRIC_UPDATE] from={msg.getSrc()} streams={streams} delay_ms={delay_ms}")
+    streams = payload.get("streams", [])
+    accumulated_delay = payload.get("accumulated_delay_ms", 0)
+    request_id = payload.get("request_id")
     
-    # Verifica se este nó é origem de alguma stream e propaga requisição
-    for stream_id in streams:
-        current_origin = db.getStreamSource(stream_id)
-        
-        # Se este nó não é a origem atual, propaga para a origem
-        if current_origin and current_origin != msg.getSrc():
-            # Gera nova requisição de métrica para verificar se há melhor caminho
-            request_id = f"req-{int(dt.datetime.now().timestamp()*1000)}"
-            start_time = dt.datetime.now()
-            
-            # Armazena requisição local
-            db.store_metric_request(request_id, {
-                "start_time": start_time,
-                "streams": [stream_id],
-                "src": msg.getSrc()  # Quem iniciou o update
-            })
-            
-            # Envia VIDEO_METRIC_REQUEST para a origem atual
-            metric_req = Message(Message.VIDEO_METRIC_REQUEST, db.get_my_ip(current_origin))
-            metric_req.metrics_encode(
-                [stream_id],
+    if not streams:
+        print("[ONODE][METRIC_UPDATE] Missing streams")
+        return
+    
+    # Atualiza métricas locais com o delay acumulado
+    db.AtualizaMetricas(msg.getSrc(), streams, accumulated_delay)
+    print(f"[ONODE][METRIC_UPDATE] from={msg.getSrc()} streams={streams} delay_ms={accumulated_delay} request_id={request_id}")
+    
+    # Propaga o UPDATE para vizinhos downstream (que não são a origem)
+    stored = db.get_metric_request(request_id) if request_id else None
+    
+    if stored:
+        # Se temos a requisição original, propaga para quem pediu
+        downstream = stored.get("src")
+        if downstream and downstream != msg.getSrc():
+            update_msg = Message(Message.VIDEO_METRIC_UPDATE, db.get_my_ip(downstream))
+            update_msg.metrics_encode(
+                streams,
                 request_id=request_id,
-                start_time=start_time,
-                accumulated_delay_ms=0
+                start_time=stored.get("start_time"),
+                accumulated_delay_ms=accumulated_delay
             )
+            send_message(update_msg, downstream, ROUTERS_RECEIVER_PORT)
+            print(f"[ONODE][METRIC_UPDATE] Propagating to downstream={downstream}")
+        
+        # Remove requisição processada
+        db.remove_metric_request(request_id)
+    else:
+        # Se não temos requisição armazenada, este update veio de outra fonte
+        # Propaga para todos os vizinhos downstream ativos para estas streams
+        with db.lock:
+            downstream_neighbors = set()
+            for stream in streams:
+                # Encontra vizinhos que estão recebendo esta stream
+                if stream in db.active_streams_table:
+                    for viz, active in db.active_streams_table[viz].items():
+                        if active == 1 and viz != msg.getSrc():
+                            downstream_neighbors.add(viz)
             
-            send_message(metric_req, current_origin, ROUTERS_RECEIVER_PORT)
-            print(f"[ONODE][METRIC_UPDATE] Propagating request for stream={stream_id} to origin={current_origin}")
+            for downstream in downstream_neighbors:
+                update_msg = Message(Message.VIDEO_METRIC_UPDATE, db.get_my_ip(downstream))
+                update_msg.metrics_encode(
+                    streams,
+                    request_id=request_id or f"fwd-{int(dt.datetime.now().timestamp()*1000)}",
+                    start_time=dt.datetime.now(),
+                    accumulated_delay_ms=accumulated_delay
+                )
+                send_message(update_msg, downstream, ROUTERS_RECEIVER_PORT)
+                print(f"[ONODE][METRIC_UPDATE] Broadcasting to downstream={downstream}")
 
 
 # =============================================================
