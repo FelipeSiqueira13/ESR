@@ -91,41 +91,83 @@ def metric_request_handler(msg: Message, db: DataBase):
         return
     request_id = payload.get("request_id")
     start_time = payload.get("start_time")
+    streams = payload.get("streams", [])
+    
     if not request_id or not start_time:
         return
+    
+    # Armazena requisição
     db.store_metric_request(request_id, {
         "start_time": start_time,
-        "streams": payload.get("streams", []),
+        "streams": streams,
         "src": msg.getSrc()
     })
-    response = Message(Message.VIDEO_METRIC_RESPONSE, db.get_my_ip(msg.getSrc()), msg.getData())
-    send_message(response, msg.getSrc(), ROUTERS_RECEIVER_PORT)
-    print(f"[ONODE][METRIC_REQ] request_id={request_id} streams={payload.get('streams')}")
+    
+    # Propaga para vizinhos downstream (que recebem estas streams)
+    downstream_neighbors = []
+    for viz in db.get_vizinhos():
+        if viz == msg.getSrc():
+            continue
+        for stream in streams:
+            if db.active_streams_table.get(viz, {}).get(stream) == 1:
+                downstream_neighbors.append(viz)
+                break
+    
+    if downstream_neighbors:
+        # Propaga para próximos nós
+        for neighbor in downstream_neighbors:
+            fwd_msg = Message(Message.VIDEO_METRIC_REQUEST, db.get_my_ip(neighbor), msg.getData())
+            send_message(fwd_msg, neighbor, ROUTERS_RECEIVER_PORT)
+        print(f"[ONODE][METRIC_PROPAGATE] request_id={request_id} -> {downstream_neighbors}")
+    else:
+        # Nó folha: responde imediatamente
+        response = Message(Message.VIDEO_METRIC_RESPONSE, db.get_my_ip(msg.getSrc()), msg.getData())
+        send_message(response, msg.getSrc(), ROUTERS_RECEIVER_PORT)
+        print(f"[ONODE][METRIC_LEAF] request_id={request_id}")
 
 def metric_response_handler(msg: Message, db: DataBase):
     try:
         payload = msg.metrics_decode()
     except Exception:
         return
+    
     request_id = payload.get("request_id")
+    incoming_delay = payload.get("accumulated_delay_ms", 0)
+    
     if not request_id:
         return
+    
     stored = db.get_metric_request(request_id)
     if not stored:
         return
+    
     start_time = stored.get("start_time")
     if not isinstance(start_time, dt.datetime):
         return
-    delay_ms = (dt.datetime.now() - start_time).total_seconds() * 1000
-    update_payload = json.dumps({
-        "request_id": request_id,
-        "streams": stored.get("streams", []),
-        "delay_ms": delay_ms
-    })
-    update_msg = Message(Message.VIDEO_METRIC_UPDATE, db.get_my_ip(stored["src"]), update_payload)
+    
+    # Calcula delay local (RTT até aqui)
+    local_delay_ms = (dt.datetime.now() - start_time).total_seconds() * 1000
+    
+    # Acumula com delay do vizinho downstream
+    total_delay_ms = local_delay_ms + incoming_delay
+    
+    # Atualiza métricas locais
+    streams = stored.get("streams", [])
+    db.AtualizaMetricas(msg.getSrc(), streams, total_delay_ms)
+    
+    # Prepara resposta com delay acumulado
+    response_payload = payload.copy()
+    response_payload["accumulated_delay_ms"] = total_delay_ms
+    
+    update_msg = Message(
+        Message.VIDEO_METRIC_RESPONSE, 
+        db.get_my_ip(stored["src"]), 
+        json.dumps(response_payload)
+    )
     send_message(update_msg, stored["src"], ROUTERS_RECEIVER_PORT)
+    
     db.remove_metric_request(request_id)
-    print(f"[ONODE][METRIC_RESP] request_id={request_id} delay_ms={delay_ms:.2f}")
+    print(f"[ONODE][METRIC_RESP] request_id={request_id} local={local_delay_ms:.2f}ms total={total_delay_ms:.2f}ms")
 
 def metric_update_handler(msg: Message, db: DataBase):
     try:

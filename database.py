@@ -67,13 +67,19 @@ class DataBase():
     def AtualizaMetricas(self, viz, streams_id, metric):
         with self.lock:
             for stream in streams_id:
-                self.streams_metrics[viz][stream] = metric*0.15 + self.streams_metrics[viz][stream]*0.85
-                v = self.streams_origin_table[stream]
-                if v == viz:
-                    if self.streams_metrics[viz][stream] < self.streams_metrics[v][stream] and self.streams_metrics[viz][stream] != 0:
+                # Aplica EMA: 90% histórico + 10% novo valor
+                old_metric = self.streams_metrics[viz].get(stream, 0)
+                self.streams_metrics[viz][stream] = metric * 0.10 + old_metric * 0.90
+                
+                # Atualiza origem se métrica for melhor
+                current_origin = self.streams_origin_table.get(stream)
+                if current_origin and viz != current_origin:
+                    if (self.streams_metrics[viz][stream] < self.streams_metrics[current_origin][stream] 
+                        and self.streams_metrics[viz][stream] > 0):
                         self.streams_origin_table[stream] = viz
+                        
                 print(f"[ONODE][METRIC_APPLY] viz={viz} stream={stream} metric={self.streams_metrics[viz][stream]:.2f}")
-            
+    
     def StreamDeativated(self, viz, streams_id):
         with self.lock:
             for stream_id in streams_id:
