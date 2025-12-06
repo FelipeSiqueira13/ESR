@@ -26,6 +26,7 @@ def _send_buffer(sock: socket.socket, payload: bytes):
         total_sent += sent
 
 def send_message(msg:Message, host:str, port:int):
+    print(f"[ONODE][QUEUE] type={msg.getType()} -> {host}:{port} data={msg.getData()}")
     send_queue.put((msg, host, port))
 
 def stream_pls_handler(msg:Message, db:DataBase):
@@ -99,6 +100,7 @@ def metric_request_handler(msg: Message, db: DataBase):
     })
     response = Message(Message.VIDEO_METRIC_RESPONSE, db.get_my_ip(msg.getSrc()), msg.getData())
     send_message(response, msg.getSrc(), ROUTERS_RECEIVER_PORT)
+    print(f"[ONODE][METRIC_REQ] request_id={request_id} streams={payload.get('streams')}")
 
 def metric_response_handler(msg: Message, db: DataBase):
     try:
@@ -123,6 +125,7 @@ def metric_response_handler(msg: Message, db: DataBase):
     update_msg = Message(Message.VIDEO_METRIC_UPDATE, db.get_my_ip(stored["src"]), update_payload)
     send_message(update_msg, stored["src"], ROUTERS_RECEIVER_PORT)
     db.remove_metric_request(request_id)
+    print(f"[ONODE][METRIC_RESP] request_id={request_id} delay_ms={delay_ms:.2f}")
 
 def metric_update_handler(msg: Message, db: DataBase):
     try:
@@ -133,6 +136,7 @@ def metric_update_handler(msg: Message, db: DataBase):
     delay_ms = payload.get("delay_ms")
     if streams and delay_ms is not None:
         db.AtualizaMetricas(msg.getSrc(), streams, delay_ms)
+        print(f"[ONODE][METRIC_UPDATE] from={msg.getSrc()} streams={streams} delay_ms={delay_ms}")
 
 
 # =============================================================
@@ -163,6 +167,7 @@ def listener(db:DataBase):
                             if dados:
                                 msg = Message.deserialize(dados)
                                 typeOfMsg = msg.getType() 
+                                print(f"[ONODE][LISTENER] from={addr[0]} type={typeOfMsg} data={msg.getData()}")
                                 if typeOfMsg == Message.STREAM_REQUEST:
                                     threading.Thread(target=stream_pls_handler, args=(msg, db)).start()
                                 elif typeOfMsg == Message.STREAM_STOP:
@@ -188,6 +193,7 @@ def sender(db:DataBase):
     while True:
         try:
             msg, host, port = send_queue.get()
+            print(f"[ONODE][SENDER] dequeued type={msg.getType()} target={host}:{port}")
             payload = msg.serialize() + b'\n'
             key = (host, port)
             success = False
@@ -275,6 +281,7 @@ def cntrl(db:DataBase):
                                 msgr_ip = msg.getSrc()
                                 typeOfMsg = msg.getType()
                                 if typeOfMsg == Message.ADD_NEIGHBOUR:
+                                    print(f"[ONODE][CNTRL] ADD_NEIGHBOUR from {msgr_ip}")
                                     threading.Thread(target=db.inicializaVizinho, args=(msgr_ip,)).start()
                                     msg_resp = Message(Message.RESP_NEIGHBOUR, db.get_my_ip(msgr_ip), "")
 

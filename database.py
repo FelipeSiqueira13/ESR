@@ -72,6 +72,7 @@ class DataBase():
                 if v == viz:
                     if self.streams_metrics[viz][stream] < self.streams_metrics[v][stream] and self.streams_metrics[viz][stream] != 0:
                         self.streams_origin_table[stream] = viz
+                print(f"[ONODE][METRIC_APPLY] viz={viz} stream={stream} metric={self.streams_metrics[viz][stream]:.2f}")
             
     def StreamDeativated(self, viz, streams_id):
         with self.lock:

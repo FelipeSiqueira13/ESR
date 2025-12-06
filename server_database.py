@@ -85,6 +85,7 @@ class ServerDataBase():
 
     def record_metric(self, vizinho, streams, delay_ms, request_id=None):
         with self.lock:
+            print(f"[SERVER][METRIC_STORE] vizinho={vizinho} streams={streams} delay_ms={delay_ms} request_id={request_id}")
             metrics = self.stream_metrics.setdefault(vizinho, {})
             timestamp = dt.datetime.now().isoformat()
             for stream in streams:

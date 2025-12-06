@@ -28,7 +28,7 @@ def stream_request_handler(msg, database: ServerDataBase):
     src = msg.getSrc()
     stream_id = msg.getData()
     database.initiate_stream(src, stream_id)
-    print(f"Stream {stream_id} requested by {src}")
+    print(f"[SERVER][STREAM_REQUEST] src={src} stream_id={stream_id}")
 
 def stream_stop_handler(msg, database: ServerDataBase):
     src = msg.getSrc()
@@ -60,6 +60,7 @@ def listener(sdb:ServerDataBase):
                             if dados:
                                 msg = Message.deserialize(dados)
                                 typeOfMsg = msg.getType()
+                                print(f"[SERVER][LISTENER] from={addr[0]} type={typeOfMsg} data={msg.getData()}")
 
                                 if typeOfMsg == Message.STREAM_REQUEST:
                                     threading.Thread(target=stream_request_handler, args=(msg, sdb), daemon=True).start()
@@ -103,6 +104,7 @@ def sender(sdb:ServerDataBase):
                             src = sdb.get_my_ip(vizinho)
                             msg_data = {"stream_id": stream_id, "frame": frame}
                             msg_frame = Message(Message.MM, src, json.dumps(msg_data))
+                            print(f"[SERVER][SENDER] stream={stream_id} frame={vs.frameNbr()} -> {vizinho}")
                             sckt.sendto(msg_frame.serialize(), (vizinho, SENDER_PORT))
                     except Exception as e:
                         print(f"Error sending frame for {stream_id}: {e}")
@@ -138,6 +140,7 @@ def cntrl(sdb:ServerDataBase):
                                 msgr_ip = msg.getSrc()
                                 typeOfMsg = msg.getType() 
                                 if typeOfMsg == Message.ADD_NEIGHBOUR:
+                                    print(f"[SERVER][CNTRL] ADD_NEIGHBOUR from {msgr_ip}")
                                     sdb.inicializaVizinho(msgr_ip)
                                     msg_resp = Message(Message.RESP_NEIGHBOUR, sdb.get_my_ip(msgr_ip), "")
                                     _send_buffer(conn, msg_resp.serialize() + b'\n')
@@ -149,6 +152,7 @@ def cntrl(sdb:ServerDataBase):
                                 elif typeOfMsg == Message.VIDEO_METRIC_UPDATE:
                                     try:
                                         payload = json.loads(msg.getData() or "{}")
+                                        print(f"[SERVER][CNTRL] VIDEO_METRIC_UPDATE from {msgr_ip}: {payload}")
                                     except json.JSONDecodeError:
                                         print("Invalid VIDEO_METRIC_UPDATE payload received.")
                                         continue
@@ -170,6 +174,7 @@ def cntrl(sdb:ServerDataBase):
 
 def send_control_message(host, message: Message):
     try:
+        print(f"[SERVER][CTRL_SEND] -> {host} type={message.getType()} data={message.getData()}")
         with socket.create_connection((host, ROUTERS_RECEIVER_PORT), timeout=5) as ctrl:
             _send_buffer(ctrl, message.serialize() + b'\n')
     except Exception as e:
@@ -187,6 +192,7 @@ def metric_updater(sdb:ServerDataBase):
                 start_time = dt.datetime.utcnow()
                 request_id = f"req-{uuid.uuid4().hex[:10]}"
                 sdb.register_metric_request(request_id, viz, streams, start_time)
+                print(f"[SERVER][METRIC_REQ] to={viz} streams={streams} request_id={request_id}")
                 msg = Message(Message.VIDEO_METRIC_REQUEST, sdb.get_my_ip(viz))
                 msg.metrics_encode(streams, request_id=request_id, start_time=start_time)
                 send_control_message(viz, msg)
