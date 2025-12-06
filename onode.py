@@ -128,22 +128,33 @@ def metric_request_handler(msg: Message, db: DataBase):
 def metric_response_handler(msg: Message, db: DataBase):
     try:
         payload = msg.metrics_decode()
-    except Exception:
+    except Exception as e:
+        print(f"[ONODE][METRIC_RESP] Failed to decode: {e}")
+        return
+    
+    if not isinstance(payload, dict):
+        print(f"[ONODE][METRIC_RESP] Invalid payload type: {type(payload)}")
         return
     
     request_id = payload.get("request_id")
     incoming_delay = payload.get("accumulated_delay_ms", 0)
     
     if not request_id:
+        print("[ONODE][METRIC_RESP] Missing request_id")
         return
     
     stored = db.get_metric_request(request_id)
     if not stored:
+        print(f"[ONODE][METRIC_RESP] No stored request for {request_id}")
         return
     
     start_time = stored.get("start_time")
     if not isinstance(start_time, dt.datetime):
-        return
+        try:
+            start_time = dt.datetime.fromisoformat(start_time)
+        except Exception:
+            print(f"[ONODE][METRIC_RESP] Invalid start_time format")
+            return
     
     # Calcula delay local (RTT até aqui)
     local_delay_ms = (dt.datetime.now() - start_time).total_seconds() * 1000
@@ -156,8 +167,12 @@ def metric_response_handler(msg: Message, db: DataBase):
     db.AtualizaMetricas(msg.getSrc(), streams, total_delay_ms)
     
     # Prepara resposta com delay acumulado
-    response_payload = payload.copy()
-    response_payload["accumulated_delay_ms"] = total_delay_ms
+    response_payload = {
+        "request_id": request_id,
+        "streams": payload.get("streams", []),
+        "start_time": payload.get("start_time"),
+        "accumulated_delay_ms": total_delay_ms
+    }
     
     update_msg = Message(
         Message.VIDEO_METRIC_RESPONSE, 
