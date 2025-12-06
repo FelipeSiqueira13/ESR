@@ -197,12 +197,48 @@ def metric_update_handler(msg: Message, db: DataBase):
     try:
         payload = json.loads(msg.getData() or "{}")
     except json.JSONDecodeError:
+        print("[ONODE][METRIC_UPDATE] Invalid JSON payload")
         return
+    
     streams = payload.get("streams") or []
     delay_ms = payload.get("delay_ms")
-    if streams and delay_ms is not None:
-        db.AtualizaMetricas(msg.getSrc(), streams, delay_ms)
-        print(f"[ONODE][METRIC_UPDATE] from={msg.getSrc()} streams={streams} delay_ms={delay_ms}")
+    
+    if not streams or delay_ms is None:
+        print("[ONODE][METRIC_UPDATE] Missing streams or delay_ms")
+        return
+    
+    # Atualiza métricas locais
+    db.AtualizaMetricas(msg.getSrc(), streams, delay_ms)
+    print(f"[ONODE][METRIC_UPDATE] from={msg.getSrc()} streams={streams} delay_ms={delay_ms}")
+    
+    # Verifica se este nó é origem de alguma stream e propaga requisição
+    for stream_id in streams:
+        current_origin = db.getStreamSource(stream_id)
+        
+        # Se este nó não é a origem atual, propaga para a origem
+        if current_origin and current_origin != msg.getSrc():
+            # Gera nova requisição de métrica para verificar se há melhor caminho
+            request_id = f"req-{int(dt.datetime.now().timestamp()*1000)}"
+            start_time = dt.datetime.now()
+            
+            # Armazena requisição local
+            db.store_metric_request(request_id, {
+                "start_time": start_time,
+                "streams": [stream_id],
+                "src": msg.getSrc()  # Quem iniciou o update
+            })
+            
+            # Envia VIDEO_METRIC_REQUEST para a origem atual
+            metric_req = Message(Message.VIDEO_METRIC_REQUEST, db.get_my_ip(current_origin))
+            metric_req.metrics_encode(
+                [stream_id],
+                request_id=request_id,
+                start_time=start_time,
+                accumulated_delay_ms=0
+            )
+            
+            send_message(metric_req, current_origin, ROUTERS_RECEIVER_PORT)
+            print(f"[ONODE][METRIC_UPDATE] Propagating request for stream={stream_id} to origin={current_origin}")
 
 
 # =============================================================
