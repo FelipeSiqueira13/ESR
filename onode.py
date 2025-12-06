@@ -147,51 +147,64 @@ def metric_response_handler(msg: Message, db: DataBase):
     
     request_id = payload.get("request_id")
     incoming_delay = payload.get("accumulated_delay_ms", 0)
+    streams = payload.get("streams", [])
+    start_time = payload.get("start_time")
     
-    if not request_id:
-        print("[ONODE][METRIC_RESP] Missing request_id")
+    if not request_id or not streams:
+        print("[ONODE][METRIC_RESP] Missing request_id or streams")
         return
     
+    # Verifica se este nó iniciou a requisição (tem ela armazenada)
     stored = db.get_metric_request(request_id)
-    if not stored:
-        print(f"[ONODE][METRIC_RESP] No stored request for {request_id}")
-        return
     
-    start_time = stored.get("start_time")
-    if not isinstance(start_time, dt.datetime):
-        try:
-            start_time = dt.datetime.fromisoformat(start_time)
-        except Exception:
-            print(f"[ONODE][METRIC_RESP] Invalid start_time format")
-            return
-    
-    # Calcula delay local (RTT até aqui)
-    local_delay_ms = (dt.datetime.now() - start_time).total_seconds() * 1000
-    
-    # Acumula com delay do vizinho downstream
-    total_delay_ms = local_delay_ms + incoming_delay
-    
-    # Atualiza métricas locais
-    streams = stored.get("streams", [])
-    db.AtualizaMetricas(msg.getSrc(), streams, total_delay_ms)
-    
-    # Propaga resposta para o nó que iniciou a requisição
-    update_msg = Message(
-        Message.VIDEO_METRIC_RESPONSE, 
-        db.get_my_ip(stored["src"])
-    )
-    # Mantém o start_time original (não a string ISO)
-    update_msg.metrics_encode(
-        streams,
-        request_id=request_id,
-        start_time=start_time,  # Usa datetime original, não a string
-        accumulated_delay_ms=total_delay_ms
-    )
-    
-    send_message(update_msg, stored["src"], ROUTERS_RECEIVER_PORT)
-    
-    db.remove_metric_request(request_id)
-    print(f"[ONODE][METRIC_RESP] request_id={request_id} local={local_delay_ms:.2f}ms incoming={incoming_delay:.2f}ms total={total_delay_ms:.2f}ms -> {stored['src']}")
+    if stored:
+        # ESTE NÓ INICIOU A REQUISIÇÃO - atualiza métricas e finaliza
+        if not isinstance(start_time, dt.datetime):
+            try:
+                start_time = dt.datetime.fromisoformat(start_time)
+            except Exception:
+                print(f"[ONODE][METRIC_RESP] Invalid start_time format")
+                return
+        
+        local_delay_ms = (dt.datetime.now() - start_time).total_seconds() * 1000
+        total_delay_ms = local_delay_ms + incoming_delay
+        
+        db.AtualizaMetricas(msg.getSrc(), streams, total_delay_ms)
+        db.remove_metric_request(request_id)
+        print(f"[ONODE][METRIC_RESP][ORIGIN] request_id={request_id} local={local_delay_ms:.2f}ms incoming={incoming_delay:.2f}ms total={total_delay_ms:.2f}ms")
+    else:
+        # NÓ INTERMEDIÁRIO - apenas propaga a resposta downstream
+        # Calcula delay de processamento local (tempo desde que a resposta chegou)
+        processing_delay_ms = 0.5  # Delay simbólico de processamento
+        total_delay_ms = incoming_delay + processing_delay_ms
+        
+        # Atualiza métricas locais
+        db.AtualizaMetricas(msg.getSrc(), streams, total_delay_ms)
+        
+        # Encontra para quem deve propagar (downstream)
+        downstream_neighbors = set()
+        for stream in streams:
+            with db.lock:
+                for viz, active_streams in db.active_streams_table.items():
+                    if stream in active_streams and active_streams[stream] == 1 and viz != msg.getSrc():
+                        # Verifica se este vizinho está downstream (recebe a stream)
+                        stream_source = db.getStreamSource(stream)
+                        if stream_source == msg.getSrc() or stream_source is None:
+                            downstream_neighbors.add(viz)
+        
+        if downstream_neighbors:
+            for downstream in downstream_neighbors:
+                fwd_msg = Message(Message.VIDEO_METRIC_RESPONSE, db.get_my_ip(downstream))
+                fwd_msg.metrics_encode(
+                    streams,
+                    request_id=request_id,
+                    start_time=start_time,
+                    accumulated_delay_ms=total_delay_ms
+                )
+                send_message(fwd_msg, downstream, ROUTERS_RECEIVER_PORT)
+            print(f"[ONODE][METRIC_RESP][RELAY] request_id={request_id} delay={total_delay_ms:.2f}ms -> {list(downstream_neighbors)}")
+        else:
+            print(f"[ONODE][METRIC_RESP][RELAY] request_id={request_id} no downstream neighbors found")
 
 def metric_update_handler(msg: Message, db: DataBase):
     try:
