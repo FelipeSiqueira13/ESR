@@ -56,7 +56,6 @@ class ServerDataBase():
     def get_my_ip(self, vizinho_ip):
         return self.my_ip
 
-
     def get_streams(self):
         with self.lock:
             """Retorna lista de ids streams"""
