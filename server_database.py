@@ -67,17 +67,23 @@ class ServerDataBase():
     def initiate_stream(self,src,stream_id):
         with self.lock:
             """Adiciona o stream_id ao dicionario de streams_vizinhos"""
+            print(f"[SDB] initiate_stream called for src={src} stream={stream_id}")
             if stream_id not in self.stream_vizinhos:
                 self.stream_vizinhos[stream_id] = []
             if src not in self.stream_vizinhos[stream_id]:
                 self.stream_vizinhos[stream_id].append(src)
+                print(f"[SDB] Added {src} to stream {stream_id}. Current list: {self.stream_vizinhos[stream_id]}")
+            else:
+                print(f"[SDB] {src} already in stream {stream_id}")
     
     def end_stream(self,src,stream_id):
         with self.lock:
             """Remove o stream_id do dicionario de streams_vizinhos"""
+            print(f"[SDB] end_stream called for src={src} stream={stream_id}")
             if stream_id in self.stream_vizinhos:
                 if src in self.stream_vizinhos[stream_id]:
                     self.stream_vizinhos[stream_id].remove(src)
+                    print(f"[SDB] Removed {src} from stream {stream_id}")
                     if not self.stream_vizinhos[stream_id]:
                         del self.stream_vizinhos[stream_id]
     
