@@ -29,9 +29,13 @@ class ServerDataBase():
 
         self.my_ip = list(data.keys())[0] if data else None
 
-        for ip in data.keys():
-            self.server_vizinhos[ip] = 0  # Inicializa estado/métricas do vizinho
+        # Inicializa estado para cada interface local e cada vizinho configurado
+        for ip, neighs in data.items():
+            self.server_vizinhos[ip] = 0  # minha(s) interfaces
             self.neighbor_last_seen[ip] = None
+            for viz in (neighs if isinstance(neighs, list) else [neighs]):
+                self.server_vizinhos[viz] = 0
+                self.neighbor_last_seen[viz] = None
 
     def touch_neighbor(self, viz):
         with self.lock:
