@@ -149,7 +149,7 @@ def cntrl(sdb:ServerDataBase):
         try:
             conn, addr = sckt.accept()
             
-            def handle_router_connection():
+            def handle_router_connection(conn, addr):
                 try:
                     buffer = b''
                     while True:
@@ -192,7 +192,7 @@ def cntrl(sdb:ServerDataBase):
                 finally:
                     conn.close()
             
-            threading.Thread(target=handle_router_connection, daemon=True).start()
+            threading.Thread(target=handle_router_connection, args=(conn, addr), daemon=True).start()
         except Exception as e:
             print(f"Error in control listener: {e}")
     sckt.close()
