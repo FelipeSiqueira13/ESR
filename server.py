@@ -207,6 +207,15 @@ def send_control_message(host, message: Message):
         print(f"Failed to send control message to {host}: {e}")
 
 
+def _send_control_quiet(host, message: Message):
+    """Versão silenciosa usada apenas pelos heartbeats para não poluir o terminal."""
+    try:
+        with socket.create_connection((host, ROUTERS_RECEIVER_PORT), timeout=5) as ctrl:
+            _send_buffer(ctrl, message.serialize() + b'\n')
+    except Exception:
+        pass
+
+
 def heartbeat_sender(sdb: ServerDataBase):
     """Envia ADD_NEIGHBOUR periódico aos vizinhos conhecidos."""
     while True:
@@ -215,9 +224,9 @@ def heartbeat_sender(sdb: ServerDataBase):
                 neighbors = list(sdb.server_vizinhos.keys())
             for viz in neighbors:
                 msg = Message(Message.ADD_NEIGHBOUR, sdb.get_my_ip(viz), "")
-                send_control_message(viz, msg)
+                _send_control_quiet(viz, msg)
         except Exception as e:
-            print(f"[SERVER][HB_SEND][ERR] {e}")
+            pass
         finally:
             time.sleep(HEARTBEAT_INTERVAL)
 
@@ -233,7 +242,7 @@ def heartbeat_check(sdb: ServerDataBase):
                     print(f"[SERVER][HB_DOWN] viz={viz}")
                     sdb.mark_neighbor_down(viz)
         except Exception as e:
-            print(f"[SERVER][HB_CHECK][ERR] {e}")
+            pass
         finally:
             time.sleep(HEARTBEAT_INTERVAL)
 

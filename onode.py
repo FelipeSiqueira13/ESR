@@ -606,7 +606,7 @@ def heartbeat_check(db: DataBase):
                         db.best_cost[s] = math.inf  # reset para aceitar anúncio seguinte mesmo com custo maior
                         affected_streams.add(s)
 
-                    print(f"[HEARTBEAT] vizinho {viz} OFF; parents reset={to_reset}")
+                    log_ev("HB_NEIGH_DOWN", viz=viz, parents_reset=to_reset)
 
             # Fora do lock: tenta recalc e reenviar STREAM_REQUEST para streams afetadas
             for stream_id in affected_streams:
