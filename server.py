@@ -116,7 +116,9 @@ def sender(sdb:ServerDataBase):
                     continue
 
                 # stream_key = "<server>:<stream>"
-                stream_key = f"{sdb.name}:{stream_id}"
+                # stream_key = "<server>:<stream>"
+                # FIX: Use simple stream_id to match signaling (client requests "stream1", not "S1:stream1")
+                stream_key = stream_id 
                 stream_num = _stream_id_to_int(stream_key)
                 payload = stream_key.encode('utf-8') + b'\0' + frame
                 packet_bytes = SimplePacket.encode(
@@ -128,11 +130,15 @@ def sender(sdb:ServerDataBase):
 
                 for vizinho in viz:
                     try:
-                        print(f"[SERVER][SENDER] stream={stream_key} frame={vs.frameNbr()} -> {vizinho}")
+                        # print(f"[SERVER][SENDER] stream={stream_key} frame={vs.frameNbr()} -> {vizinho}")
                         sckt.sendto(packet_bytes, (vizinho, SENDER_PORT))
                     except Exception as e:
                         print(f"Error sending frame for {stream_key} to {vizinho}: {e}")
             
+            # Log periódico para debug
+            if time.time() % 2 < 0.05:
+                 print(f"[SERVER][DEBUG] Active streams: {list(streams_active.keys())} Targets: {sdb.get_streams_vizinhos()}")
+
             time.sleep(0.03333)
         except Exception as e:
             print(f"Error in sender: {e}")
