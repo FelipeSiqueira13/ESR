@@ -14,6 +14,7 @@ class Message:
     REMOVE_NEIGHBOUR = 9
     RESP_NEIGHBOUR = 10
     MM = 11
+    PING = 12
 
     def __init__(self, type,src,data:str=""):
         self.mytype = type    

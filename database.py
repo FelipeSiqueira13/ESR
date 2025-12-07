@@ -2,6 +2,8 @@ from asyncio import streams
 import json
 import sys
 import threading
+import math
+import datetime as dt
 
 class DataBase():
 
@@ -15,6 +17,12 @@ class DataBase():
         raw = ip_config.get(name, {})
         self.ip_to_viz = {ip: (v if isinstance(v, list) else [v]) for ip, v in raw.items()}
         self.lock = threading.Lock()
+        self.neighbor_last_seen = {}  # vizinho -> datetime
+        self.best_parent = {}         # stream_id -> ip vizinho
+        self.best_cost = {}           # stream_id -> métrica
+        self.seen_msgs = set()
+        self.hysteresis_factor = 0.9
+        self.downstream = {}          # stream_id -> set(vizinhos downstream ativos)
 
         print("Initialized neighbours (ip -> [neighbours]):", self.ip_to_viz)
 
@@ -88,36 +96,32 @@ class DataBase():
 
     def activateStream(self, viz, stream_id):
         with self.lock:
-            is_stream_active = False
             if stream_id in self.available_streams and viz in self.active_streams_table:
-                for v in self.vizinhos:
-                    if self.active_streams_table[v][stream_id] == 1:
-                        is_stream_active = True
-                        break
+                already_active = any(
+                    self.active_streams_table[v][stream_id] == 1 for v in self.vizinhos
+                )
                 self.active_streams_table[viz][stream_id] = 1
                 print(f"Stream {stream_id} activated for neighbour {viz}.\n")
+                # precisa pedir upstream se antes não havia nenhum ativo
+                need_upstream = not already_active
             else:
                 print(f"ERROR: Stream {stream_id} cannot be activated for {viz}.\n")
-            return is_stream_active
-
-    def get_streams(self):
-        with self.lock:
-            """Retorna lista de ids streams"""
-            return list(self.available_streams)
+                need_upstream = False
+            return need_upstream
 
     def deactivateStream(self, viz, stream_id):
         with self.lock:
-            is_stream_active = False
             if stream_id in self.available_streams and viz in self.active_streams_table:
                 self.active_streams_table[viz][stream_id] = 0
-                for v in self.vizinhos:
-                    if self.active_streams_table[v][stream_id] == 1:
-                        is_stream_active = True
-                        break
+                still_active = any(
+                    self.active_streams_table[v][stream_id] == 1 for v in self.vizinhos
+                )
                 print(f"Stream {stream_id} deactivated for neighbour {viz}.\n")
             else:
                 print(f"ERROR: Stream {stream_id} cannot be deactivated for {viz}.\n")
-            return is_stream_active
+                still_active = False
+            # retorna se ainda existe alguém ativo (True => não propaga STOP)
+            return still_active
 
     def printActiveStreamsTable(self):
         print("         " + " ".join(f"{s:>4}" for s in self.available_streams))
@@ -134,41 +138,51 @@ class DataBase():
             print(f"ERROR: Stream {stream_id} has no known source.\n")
             return None
 
-    # =============================================================
-    #           FUNÇÕES DE OVERLAY / VIZINHOS (arquivo 2)
-    # =============================================================
-
-    def inicializaVizinho(self, viz):
+    def touch_neighbor(self, viz):
         with self.lock:
-            if viz in self.vizinhos:
-                self.vizinhos_inicializados[viz] = 1
-                print(f"Neighbour {viz} initialized.\n")
+            self.neighbor_last_seen[viz] = dt.datetime.now()
+
+    def is_neighbor_alive(self, viz, timeout_s: float) -> bool:
+        with self.lock:
+            ts = self.neighbor_last_seen.get(viz)
+        if not ts:
+            return False
+        return (dt.datetime.now() - ts).total_seconds() < timeout_s
+
+    # ---------------- Best parent/cost ----------------
+    def update_announce(self, stream_id: str, cost: float, parent_ip: str) -> bool:
+        with self.lock:
+            prev = self.best_cost.get(stream_id, math.inf)
+            if cost < prev * self.hysteresis_factor:
+                self.best_cost[stream_id] = cost
+                self.best_parent[stream_id] = parent_ip
+                return True
+            return False
+
+    def get_best_parent(self, stream_id: str):
+        with self.lock:
+            return self.best_parent.get(stream_id)
+
+    def get_best_cost(self, stream_id: str):
+        with self.lock:
+            return self.best_cost.get(stream_id, math.inf)
+
+    # ---------------- Downstream ativos ----------------
+    def set_downstream_active(self, viz: str, stream_id: str, active: bool):
+        with self.lock:
+            ds = self.downstream.setdefault(stream_id, set())
+            if active:
+                ds.add(viz)
             else:
-                print(f"Neighbour {viz} could not be initialized.\n")
+                ds.discard(viz)
 
-    def removeVizinho(self, viz):
+    def get_downstream(self, stream_id: str):
         with self.lock:
-            if viz in self.vizinhos:
-                self.vizinhos_inicializados[viz] = 0
-                print(f"Neighbour {viz} removed.\n")
-            else:
-                print(f"Neighbour {viz} could not be removed.\n")
+            return set(self.downstream.get(stream_id, set()))
 
-    def printVizinhosInicializados(self):
-        for viz, status in self.vizinhos_inicializados.items():
-            print(f"{viz}: {status}")
-
-    def store_metric_request(self, request_id, payload):
+    def has_downstream(self, stream_id: str) -> bool:
         with self.lock:
-            self.pending_metric_requests[request_id] = payload
-
-    def get_metric_request(self, request_id):
-        with self.lock:
-            return self.pending_metric_requests.get(request_id)
-
-    def remove_metric_request(self, request_id):
-        with self.lock:
-            return self.pending_metric_requests.pop(request_id, None)
+            return bool(self.downstream.get(stream_id))
 
 
 # =============================================================

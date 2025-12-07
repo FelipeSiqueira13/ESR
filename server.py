@@ -8,12 +8,16 @@ from msg import Message
 from VideoStream import VideoStream
 import time
 import json
+from SimplePacket import SimplePacket
+import hashlib
 
 RECEIVER_PORT = 40331
 SENDER_PORT = 40332
 ROUTERS_RECEIVER_PORT = 40333
 ROUTERS_SENDER_PORT = 40334
 METRIC_INTERVAL_SECONDS = 5
+HEARTBEAT_INTERVAL = 5
+HEARTBEAT_TIMEOUT = 15
 
 def _send_buffer(sock: socket.socket, payload: bytes):
     view = memoryview(payload)
@@ -62,6 +66,9 @@ def listener(sdb:ServerDataBase):
                                 typeOfMsg = msg.getType()
                                 print(f"[SERVER][LISTENER] from={addr[0]} type={typeOfMsg} data={msg.getData()}")
 
+                                # qualquer mensagem toca o vizinho
+                                sdb.touch_neighbor(addr[0])
+
                                 if typeOfMsg == Message.STREAM_REQUEST:
                                     threading.Thread(target=stream_request_handler, args=(msg, sdb), daemon=True).start()
                                 elif typeOfMsg == Message.STREAM_STOP:
@@ -75,6 +82,10 @@ def listener(sdb:ServerDataBase):
         except Exception as e:
             print(f"Error in listener: {e}")
     sckt.close()
+
+def _stream_id_to_int(stream_id: str) -> int:
+    """Mapeia o id textual da stream para um inteiro de 32 bits (consistente)."""
+    return int.from_bytes(hashlib.sha256(stream_id.encode('utf-8')).digest()[:4], 'big', signed=False)
 
 def sender(sdb:ServerDataBase):
     print("Sender thread started")
@@ -97,17 +108,30 @@ def sender(sdb:ServerDataBase):
                             continue
 
                 vs = streams_active.get(stream_id)
-                if vs:
+                if not vs:
+                    continue
+
+                frame = vs.nextFrame()
+                if not frame:
+                    continue
+
+                # stream_key = "<server>:<stream>"
+                stream_key = f"{sdb.name}:{stream_id}"
+                stream_num = _stream_id_to_int(stream_key)
+                payload = stream_key.encode('utf-8') + b'\0' + frame
+                packet_bytes = SimplePacket.encode(
+                    stream_id=stream_num,
+                    frame_num=vs.frameNbr(),
+                    timestamp=time.time(),
+                    frame_data=payload
+                )
+
+                for vizinho in viz:
                     try:
-                        frame = vs.nextFrame()
-                        for vizinho in viz:
-                            src = sdb.get_my_ip(vizinho)
-                            msg_data = {"stream_id": stream_id, "frame": frame}
-                            msg_frame = Message(Message.MM, src, json.dumps(msg_data))
-                            print(f"[SERVER][SENDER] stream={stream_id} frame={vs.frameNbr()} -> {vizinho}")
-                            sckt.sendto(msg_frame.serialize(), (vizinho, SENDER_PORT))
+                        print(f"[SERVER][SENDER] stream={stream_key} frame={vs.frameNbr()} -> {vizinho}")
+                        sckt.sendto(packet_bytes, (vizinho, SENDER_PORT))
                     except Exception as e:
-                        print(f"Error sending frame for {stream_id}: {e}")
+                        print(f"Error sending frame for {stream_key} to {vizinho}: {e}")
             
             time.sleep(0.03333)
         except Exception as e:
@@ -139,6 +163,8 @@ def cntrl(sdb:ServerDataBase):
                                 msg = Message.deserialize(dados)
                                 msgr_ip = msg.getSrc()
                                 typeOfMsg = msg.getType() 
+                                # marca último contacto
+                                sdb.touch_neighbor(msgr_ip)
                                 if typeOfMsg == Message.ADD_NEIGHBOUR:
                                     print(f"[SERVER][CNTRL] ADD_NEIGHBOUR from {msgr_ip}")
                                     sdb.inicializaVizinho(msgr_ip)
@@ -180,6 +206,37 @@ def send_control_message(host, message: Message):
     except Exception as e:
         print(f"Failed to send control message to {host}: {e}")
 
+
+def heartbeat_sender(sdb: ServerDataBase):
+    """Envia ADD_NEIGHBOUR periódico aos vizinhos conhecidos."""
+    while True:
+        try:
+            with sdb.lock:
+                neighbors = list(sdb.server_vizinhos.keys())
+            for viz in neighbors:
+                msg = Message(Message.ADD_NEIGHBOUR, sdb.get_my_ip(viz), "")
+                send_control_message(viz, msg)
+        except Exception as e:
+            print(f"[SERVER][HB_SEND][ERR] {e}")
+        finally:
+            time.sleep(HEARTBEAT_INTERVAL)
+
+
+def heartbeat_check(sdb: ServerDataBase):
+    """Marca vizinho down após timeout; remove de stream_vizinhos/server_vizinhos."""
+    while True:
+        try:
+            with sdb.lock:
+                neighbors = list(sdb.server_vizinhos.keys())
+            for viz in neighbors:
+                if not sdb.is_neighbor_alive(viz, HEARTBEAT_TIMEOUT):
+                    print(f"[SERVER][HB_DOWN] viz={viz}")
+                    sdb.mark_neighbor_down(viz)
+        except Exception as e:
+            print(f"[SERVER][HB_CHECK][ERR] {e}")
+        finally:
+            time.sleep(HEARTBEAT_INTERVAL)
+
 def metric_updater(sdb:ServerDataBase):
     print("Metric updater thread started")
     while True:
@@ -212,8 +269,10 @@ def main():
     thread_sender = threading.Thread(target=sender, args=(sdb,))
     thread_cntrl = threading.Thread(target=cntrl, args=(sdb,))
     thread_metrics = threading.Thread(target=metric_updater, args=(sdb,))
+    thread_hb = threading.Thread(target=heartbeat_sender, args=(sdb,))
+    thread_hbchk = threading.Thread(target=heartbeat_check, args=(sdb,))
 
-    all_threads = [thread_listen, thread_sender, thread_cntrl, thread_metrics]
+    all_threads = [thread_listen, thread_sender, thread_cntrl, thread_metrics, thread_hb, thread_hbchk]
 
     for t in all_threads:
         t.daemon = True

@@ -2,32 +2,50 @@ class VideoStream:
     
     def __init__(self, filename):
         self.filename = filename
+        self.file = None
         try:
             self.file = open(filename, 'rb')
         except Exception as e:
-            pass
+            raise FileNotFoundError(f"Cannot open video file '{filename}': {e}")
         self.frameNum = 0
 
     def nextFrame(self):
-        """Get next frame."""
-        data = self.file.read(5) # Get the framelength from the first 5 bits
-        if data:
-            framelength = int(data)
+        """Get next frame; reinicia ao fim do ficheiro."""
+        if not self.file:
+            return None
 
-            # Read the current frame
+        while True:
+            header = self.file.read(5)  # 5 bytes ASCII com o tamanho
+            if not header or len(header) < 5:
+                # EOF ou header incompleto: reinicia e tenta de novo
+                self.restart_stream()
+                continue
+
+            try:
+                framelength = int(header.decode('ascii'))
+            except ValueError:
+                # Header inválido: tenta próximo
+                self.restart_stream()
+                continue
+
+            if framelength <= 0:
+                self.restart_stream()
+                continue
+
             data = self.file.read(framelength)
+            if not data or len(data) < framelength:
+                # Frame incompleta, reinicia
+                self.restart_stream()
+                continue
+
             self.frameNum += 1
-        else:
-            # If video is over
-            self.restart_stream()
-            return self.nextFrame()
-        return data
-    
+            return data
+
     def restart_stream(self):
         """Video restarts when it's over"""
-        self.file.seek(0,0)
+        if self.file:
+            self.file.seek(0, 0)
 
     def frameNbr(self):
         """Get frame number."""
         return self.frameNum
-	

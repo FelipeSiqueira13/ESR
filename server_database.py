@@ -5,8 +5,8 @@ import socket
 import datetime as dt
 
 class ServerDataBase():
-
     def __init__(self, name):
+        self.name = name
 
         with open('server_config.json', 'r') as file:
             server_info = json.load(file)
@@ -19,6 +19,7 @@ class ServerDataBase():
         # Ex.: {"stream1": ["10.0.0.10", "10.0.1.2"], "stream2": ["10.0.3.1"]}
         self.stream_vizinhos = {}
         self.lock = threading.Lock()
+        self.neighbor_last_seen = {}  # vizinho -> datetime
         self.pending_metric_requests = {}
         self.stream_metrics = {}
 
@@ -30,6 +31,34 @@ class ServerDataBase():
 
         for ip in data.keys():
             self.server_vizinhos[ip] = 0  # Inicializa estado/métricas do vizinho
+            self.neighbor_last_seen[ip] = None
+
+    def touch_neighbor(self, viz):
+        with self.lock:
+            self.neighbor_last_seen[viz] = dt.datetime.now()
+
+    def is_neighbor_alive(self, viz, timeout_s: float) -> bool:
+        with self.lock:
+            ts = self.neighbor_last_seen.get(viz)
+        if not ts:
+            return False
+        return (dt.datetime.now() - ts).total_seconds() < timeout_s
+
+    def mark_neighbor_down(self, viz):
+        with self.lock:
+            if viz in self.server_vizinhos:
+                self.server_vizinhos[viz] = 0
+            # remove viz das listas de streams
+            to_clean = []
+            for stream, lst in self.stream_vizinhos.items():
+                if viz in lst:
+                    lst.remove(viz)
+                if not lst:
+                    to_clean.append(stream)
+            for stream in to_clean:
+                self.stream_vizinhos.pop(stream, None)
+            # limpa métricas e pending
+            self.stream_metrics.pop(viz, None)
 
     def initiate_stream(self,src,stream_id):
         with self.lock:

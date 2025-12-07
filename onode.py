@@ -3,9 +3,12 @@ import sys
 import threading
 import queue
 import datetime as dt
-import json
+import json, uuid
+import math
+import time
 from database import DataBase
 from msg import Message
+from SimplePacket import SimplePacket
 
 RECEIVER_PORT = 40331
 SENDER_PORT = 40332
@@ -15,6 +18,22 @@ ROUTERS_SENDER_PORT = 40334
 MAX_RETRIES = 3
 
 send_queue = queue.Queue()
+
+FRAME_BUFFER_SIZE = 100
+_frame_buffer = {}
+_frame_lock = threading.Lock()
+
+TTL_DEFAULT = 8
+ANNOUNCE_TYPE = Message.VIDEO_METRIC_REQUEST  # reutilizamos como ANNOUNCE
+
+HEARTBEAT_INTERVAL = 5      # segundos
+HEARTBEAT_TIMEOUT  = 15     # segundos
+HYST_FACTOR = 0.9           # mesma ideia do DB; opcional sobrescrever
+
+
+def log_ev(tag: str, **fields):
+    parts = [f"[{tag}]"] + [f"{k}={v}" for k, v in fields.items()]
+    print(" ".join(parts))
 
 def _send_buffer(sock: socket.socket, payload: bytes):
     view = memoryview(payload)
@@ -29,34 +48,58 @@ def send_message(msg:Message, host:str, port:int):
     print(f"[ONODE][QUEUE] type={msg.getType()} -> {host}:{port} data={msg.getData()}")
     send_queue.put((msg, host, port))
 
-def stream_pls_handler(msg:Message, db:DataBase):
+def _upstream_for(stream_id: str, db: DataBase):
+    """Escolhe o vizinho upstream (best_parent); fallback para origem conhecida."""
+    parent = db.get_best_parent(stream_id)
+    if parent:
+        return parent
+    return db.getStreamSource(stream_id)
+
+def stream_pls_handler(msg: Message, db: DataBase):
     stream_id = msg.data
     ip_viz = msg.getSrc()
-    need_stream = db.activateStream(ip_viz, stream_id)
+    need_upstream = db.activateStream(ip_viz, stream_id)
+    db.set_downstream_active(ip_viz, stream_id, True)
     print(f"Processed STREAM_PLS for stream {stream_id} from {msg.getSrc()}.\n")
-    if need_stream:
-        stream_request_handler(stream_id, db)
+    if need_upstream:
+        parent = _upstream_for(stream_id, db)
+        if parent:
+            req = Message(Message.STREAM_REQUEST, db.get_my_ip(parent), stream_id)
+            send_message(req, parent, RECEIVER_PORT)
+            print(f"[ONODE][STREAM_REQ] stream={stream_id} -> {parent}")
+        else:
+            print(f"[ONODE][STREAM_REQ][NO_PARENT] stream={stream_id}")
 
-def stream_no_handler(msg:Message, db:DataBase):
+def stream_no_handler(msg: Message, db: DataBase):
     stream_id = msg.data
     ip_viz = msg.getSrc()
-    is_active = db.deactivateStream(ip_viz, stream_id)
+    still_active = db.deactivateStream(ip_viz, stream_id)
+    db.set_downstream_active(ip_viz, stream_id, False)
     print(f"Processed VIDEO_NO for stream {stream_id} from {msg.getSrc()}.\n")
-    if not is_active:
-        stream_stop_handler(stream_id, db)
+    if not still_active:
+        parent = _upstream_for(stream_id, db)
+        if parent:
+            stop = Message(Message.STREAM_STOP, db.get_my_ip(parent), stream_id)
+            send_message(stop, parent, RECEIVER_PORT)
+            print(f"[ONODE][STREAM_STOP] stream={stream_id} -> {parent}")
+        else:
+            print(f"[ONODE][STREAM_STOP][NO_PARENT] stream={stream_id}")
 
-def stream_request_handler(stream_id, db:DataBase):
-    streamOrigin = db.getStreamSource(stream_id)
-    if streamOrigin:
-        msg = Message(Message.STREAM_REQUEST, db.get_my_ip(streamOrigin), stream_id)
-        send_message(msg, streamOrigin, RECEIVER_PORT)
+def stream_request_handler(stream_id, db: DataBase):
+    """Mantido para compatibilidade, agora usa best_parent."""
+    parent = _upstream_for(stream_id, db)
+    if parent:
+        msg = Message(Message.STREAM_REQUEST, db.get_my_ip(parent), stream_id)
+        send_message(msg, parent, RECEIVER_PORT)
+        print(f"[ONODE][STREAM_REQ] stream={stream_id} -> {parent}")
 
-def stream_stop_handler(stream_id, db:DataBase):
-    streamOrigin = db.getStreamSource(stream_id)
-    if streamOrigin:
-        msg = Message(Message.STREAM_STOP, db.get_my_ip(streamOrigin), stream_id)
-        send_message(msg, streamOrigin, RECEIVER_PORT)
-    
+def stream_stop_handler(stream_id, db: DataBase):
+    parent = _upstream_for(stream_id, db)
+    if parent:
+        msg = Message(Message.STREAM_STOP, db.get_my_ip(parent), stream_id)
+        send_message(msg, parent, RECEIVER_PORT)
+        print(f"[ONODE][STREAM_STOP] stream={stream_id} -> {parent}")
+
 def streams_available_handler(msg, db:DataBase):
     streams = db.get_streams() # depois tirar o sbd 
     data = ",".join(streams)
@@ -95,6 +138,8 @@ def metric_request_handler(msg: Message, db: DataBase):
     
     if not request_id or not start_time:
         return
+
+    log_ev("METRIC_REQ_RECV", req=request_id, streams=streams, cost=None, parent=None, from_=msg.getSrc())
     
     # Armazena requisição
     db.store_metric_request(request_id, {
@@ -121,7 +166,7 @@ def metric_request_handler(msg: Message, db: DataBase):
                 accumulated_delay_ms=0
             )
             send_message(fwd_msg, neighbor, ROUTERS_RECEIVER_PORT)
-        print(f"[ONODE][METRIC_PROPAGATE] request_id={request_id} -> {list(upstream_neighbors)}")
+            log_ev("METRIC_REQ_FWD", req=request_id, streams=streams, cost=None, parent=None, to=neighbor, from_=db.get_my_ip(neighbor))
     else:
         # Nó origem: responde imediatamente
         response = Message(Message.VIDEO_METRIC_RESPONSE, db.get_my_ip(msg.getSrc()))
@@ -132,7 +177,7 @@ def metric_request_handler(msg: Message, db: DataBase):
             accumulated_delay_ms=0
         )
         send_message(response, msg.getSrc(), ROUTERS_RECEIVER_PORT)
-        print(f"[ONODE][METRIC_ORIGIN] request_id={request_id}")
+        log_ev("METRIC_REQ_ORIGIN", req=request_id, streams=streams, cost=0, parent=None, to=msg.getSrc())
 
 def metric_response_handler(msg: Message, db: DataBase):
     try:
@@ -146,7 +191,7 @@ def metric_response_handler(msg: Message, db: DataBase):
         return
     
     request_id = payload.get("request_id")
-    incoming_delay = payload.get("accumulated_delay_ms", 0)
+    incoming_delay = float(payload.get("accumulated_delay_ms", 0))
     streams = payload.get("streams", [])
     start_time = payload.get("start_time")
     
@@ -154,57 +199,46 @@ def metric_response_handler(msg: Message, db: DataBase):
         print("[ONODE][METRIC_RESP] Missing request_id or streams")
         return
     
-    # Verifica se este nó iniciou a requisição (tem ela armazenada)
+    # RTT local até quem enviou a resposta
+    local_rtt_ms = measure_rtt(msg.getSrc())
+    total_delay_ms = incoming_delay + local_rtt_ms
+
+    log_ev("METRIC_RESP_RECV", req=request_id, streams=streams, cost=total_delay_ms, parent=msg.getSrc(), from_=msg.getSrc(), incoming_ms=incoming_delay, rtt_ms=local_rtt_ms, total_ms=total_delay_ms)
+
+    # Atualiza métricas e possivelmente best_parent para cada stream
+    db.AtualizaMetricas(msg.getSrc(), streams, total_delay_ms)
+    for stream in streams:
+        db.update_announce(stream, total_delay_ms, msg.getSrc())
+
     stored = db.get_metric_request(request_id)
     
     if stored:
-        # ESTE NÓ INICIOU A REQUISIÇÃO - atualiza métricas e finaliza
-        if not isinstance(start_time, dt.datetime):
-            try:
-                start_time = dt.datetime.fromisoformat(start_time)
-            except Exception:
-                print(f"[ONODE][METRIC_RESP] Invalid start_time format")
-                return
-        
-        local_delay_ms = (dt.datetime.now() - start_time).total_seconds() * 1000
-        total_delay_ms = local_delay_ms + incoming_delay
-        
-        db.AtualizaMetricas(msg.getSrc(), streams, total_delay_ms)
+        # Nó originador da requisição
         db.remove_metric_request(request_id)
-        print(f"[ONODE][METRIC_RESP][ORIGIN] request_id={request_id} local={local_delay_ms:.2f}ms incoming={incoming_delay:.2f}ms total={total_delay_ms:.2f}ms")
-    else:
-        # NÓ INTERMEDIÁRIO - apenas propaga a resposta downstream
-        # Calcula delay de processamento local (tempo desde que a resposta chegou)
-        processing_delay_ms = 0.5  # Delay simbólico de processamento
-        total_delay_ms = incoming_delay + processing_delay_ms
-        
-        # Atualiza métricas locais
-        db.AtualizaMetricas(msg.getSrc(), streams, total_delay_ms)
-        
-        # Encontra para quem deve propagar (downstream)
-        downstream_neighbors = set()
+        log_ev("METRIC_RESP_ORIGIN", req=request_id, streams=streams, cost=total_delay_ms, parent=msg.getSrc(), total_ms=total_delay_ms, rtt_ms=local_rtt_ms)
+        return
+
+    # Nó intermediário: propaga downstream (quem pediu/está ativo)
+    downstream_neighbors = set()
+    with db.lock:
         for stream in streams:
-            with db.lock:
-                for viz, active_streams in db.active_streams_table.items():
-                    if stream in active_streams and active_streams[stream] == 1 and viz != msg.getSrc():
-                        # Verifica se este vizinho está downstream (recebe a stream)
-                        stream_source = db.getStreamSource(stream)
-                        if stream_source == msg.getSrc() or stream_source is None:
-                            downstream_neighbors.add(viz)
-        
-        if downstream_neighbors:
-            for downstream in downstream_neighbors:
-                fwd_msg = Message(Message.VIDEO_METRIC_RESPONSE, db.get_my_ip(downstream))
-                fwd_msg.metrics_encode(
-                    streams,
-                    request_id=request_id,
-                    start_time=start_time,
-                    accumulated_delay_ms=total_delay_ms
-                )
-                send_message(fwd_msg, downstream, ROUTERS_RECEIVER_PORT)
-            print(f"[ONODE][METRIC_RESP][RELAY] request_id={request_id} delay={total_delay_ms:.2f}ms -> {list(downstream_neighbors)}")
-        else:
-            print(f"[ONODE][METRIC_RESP][RELAY] request_id={request_id} no downstream neighbors found")
+            for viz, active_streams in db.active_streams_table.items():
+                if active_streams.get(stream) == 1 and viz != msg.getSrc():
+                    downstream_neighbors.add(viz)
+
+    if downstream_neighbors:
+        for downstream in downstream_neighbors:
+            fwd_msg = Message(Message.VIDEO_METRIC_RESPONSE, db.get_my_ip(downstream))
+            fwd_msg.metrics_encode(
+                streams,
+                request_id=request_id,
+                start_time=start_time,
+                accumulated_delay_ms=total_delay_ms
+            )
+            send_message(fwd_msg, downstream, ROUTERS_RECEIVER_PORT)
+            log_ev("METRIC_RESP_FWD", req=request_id, streams=streams, cost=total_delay_ms, parent=msg.getSrc(), to=downstream, total_ms=total_delay_ms, from_=msg.getSrc())
+    else:
+        log_ev("METRIC_RESP_NO_DS", req=request_id, streams=streams)
 
 def metric_update_handler(msg: Message, db: DataBase):
     try:
@@ -227,7 +261,7 @@ def metric_update_handler(msg: Message, db: DataBase):
     
     # Atualiza métricas locais com o delay acumulado
     db.AtualizaMetricas(msg.getSrc(), streams, accumulated_delay)
-    print(f"[ONODE][METRIC_UPDATE] from={msg.getSrc()} streams={streams} delay_ms={accumulated_delay} request_id={request_id}")
+    log_ev("METRIC_UPDATE_RECV", req=request_id, streams=streams, cost=accumulated_delay, parent=msg.getSrc(), delay_ms=accumulated_delay, from_=msg.getSrc())
     
     # Propaga o UPDATE para vizinhos downstream (que não são a origem)
     stored = db.get_metric_request(request_id) if request_id else None
@@ -244,7 +278,7 @@ def metric_update_handler(msg: Message, db: DataBase):
                 accumulated_delay_ms=accumulated_delay
             )
             send_message(update_msg, downstream, ROUTERS_RECEIVER_PORT)
-            print(f"[ONODE][METRIC_UPDATE] Propagating to downstream={downstream}")
+            log_ev("METRIC_UPDATE_FWD", req=request_id, streams=streams, cost=accumulated_delay, parent=msg.getSrc(), delay_ms=accumulated_delay, to=downstream, from_=msg.getSrc())
         
         # Remove requisição processada
         db.remove_metric_request(request_id)
@@ -255,10 +289,9 @@ def metric_update_handler(msg: Message, db: DataBase):
             downstream_neighbors = set()
             for stream in streams:
                 # Encontra vizinhos que estão recebendo esta stream
-                if stream in db.active_streams_table:
-                    for viz, active in db.active_streams_table[viz].items():
-                        if active == 1 and viz != msg.getSrc():
-                            downstream_neighbors.add(viz)
+                for viz, active_streams in db.active_streams_table.items():
+                    if active_streams.get(stream) == 1 and viz != msg.getSrc():
+                        downstream_neighbors.add(viz)
             
             for downstream in downstream_neighbors:
                 update_msg = Message(Message.VIDEO_METRIC_UPDATE, db.get_my_ip(downstream))
@@ -269,7 +302,7 @@ def metric_update_handler(msg: Message, db: DataBase):
                     accumulated_delay_ms=accumulated_delay
                 )
                 send_message(update_msg, downstream, ROUTERS_RECEIVER_PORT)
-                print(f"[ONODE][METRIC_UPDATE] Broadcasting to downstream={downstream}")
+                log_ev("METRIC_UPDATE_BCAST", req=request_id, streams=streams, cost=accumulated_delay, parent=msg.getSrc(), delay_ms=accumulated_delay, to=downstream, from_=msg.getSrc())
 
 
 # =============================================================
@@ -322,137 +355,327 @@ def listener(db:DataBase):
 def sender(db:DataBase):
     print("Sender thread started")
     connection_cache = {}
-    
+
     while True:
         try:
             msg, host, port = send_queue.get()
-            print(f"[ONODE][SENDER] dequeued type={msg.getType()} target={host}:{port}")
             payload = msg.serialize() + b'\n'
             key = (host, port)
             success = False
-            
-            for attempt in range(MAX_RETRIES):
-                try:
 
+            for attempt in range(MAX_RETRIES):
+                sckt = None
+                try:
+                    # tenta usar cache
                     if key in connection_cache and attempt == 0:
                         sckt = connection_cache[key]
-                        try:
-                            sckt.sendall(msg.serialize() + b'\n')
-                            success = True
-                            break
-                        except Exception:
-                            try:
-                                sckt.close()
-                            except:
-                                pass
-                            del connection_cache[key]
-                    
+                        sckt.sendall(payload)
+                        success = True
+                        log_ev("TX_OK", type=msg.getType(), host=host, port=port, cached=True)
+                        break
+
+                    # nova conexão
                     sckt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     sckt.settimeout(5.0)
                     sckt.connect((host, port))
                     _send_buffer(sckt, payload)
                     connection_cache[key] = sckt
                     success = True
+                    log_ev("TX_OK", type=msg.getType(), host=host, port=port, cached=False)
                     break
-                    
+
                 except Exception as e:
+                    log_ev("TX_FAIL", type=msg.getType(), host=host, port=port, attempt=attempt+1, err=e)
+                    # limpa cache se estava guardado
                     if key in connection_cache:
                         try:
                             connection_cache[key].close()
                         except:
                             pass
-                        del connection_cache[key]
-                    
+                        connection_cache.pop(key, None)
+                    # fecha socket temporário
+                    if sckt:
+                        try:
+                            sckt.close()
+                        except:
+                            pass
                     if attempt < MAX_RETRIES - 1:
-                        print(f"Attempt {attempt + 1} failed for {host}:{port}, retrying...")
-                    else:
-                        print(f"ERROR: Failed to send message to {host}:{port} after {MAX_RETRIES} attempts - {e}")
-                        print(f"Node {host} may be offline.")
-            
+                        time.sleep(0.2)
+                        continue
+                # fim try/except
+            # fim for
+
             if not success:
-                print(f"Message to {host}:{port} discarded after {MAX_RETRIES} failed attempts.")
-                    
+                log_ev("TX_DROP", type=msg.getType(), host=host, port=port, retries=MAX_RETRIES)
+
         except Exception as e:
-            print("Error in sender: ", e)
-            break
-    
-    for sckt in connection_cache.values():
-        try:
-            sckt.close()
-        except:
-            pass
+            log_ev("SENDER_ERR", err=e)
+            # pequeno backoff para não travar em loop de erros
+            time.sleep(0.5)
+            continue
+
+def ping_handler(msg: Message, db: DataBase):
+    try:
+        payload = json.loads(msg.data or "{}")
+    except Exception:
+        return
+    stream_id = payload.get("stream_id")
+    ttl = int(payload.get("ttl", 0))
+    path = payload.get("path", [])
+    if not stream_id or ttl < 0:
+        return
+    path.append(db.my_ip)
+    parent = _upstream_for(stream_id, db)
+    if parent and ttl > 0:
+        fwd = Message(Message.PING, db.get_my_ip(parent), json.dumps({
+            "stream_id": stream_id,
+            "ttl": ttl - 1,
+            "path": path
+        }))
+        send_message(fwd, parent, ROUTERS_RECEIVER_PORT)
+        print(f"[PING][FWD] stream={stream_id} ttl={ttl-1} -> {parent} path={path}")
+    else:
+        print(f"[PING][END] stream={stream_id} path={path}")
             
 
 def cntrl(db:DataBase):
-    """
-    avisa os vizinhos, que está ligado, verifica quais estão e quando um é desligado ele percebe com o tempo
-    """
+    print("Control thread started")
     sckt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sckt.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sckt.bind(('', ROUTERS_RECEIVER_PORT))
-    sckt.listen(10)
+    sckt.listen(5)
 
-    vizinhos = db.get_vizinhos()
-    threading.Thread(target=wake_router_handler, args=(vizinhos, db)).start()
+    while True:
+        client_socket, client_address = sckt.accept()
+        data = client_socket.recv(4096)
+        try:
+            msg = Message.deserialize(data.decode('utf-8'))
+        except Exception as e:
+            client_socket.close()
+            continue
+
+        # marca neighbor vivo em qualquer mensagem de controle
+        db.touch_neighbor(client_address[0])
+
+        if msg.getType() == ANNOUNCE_TYPE:
+            announce_handler(msg, db)
+        elif msg.getType() == Message.ADD_NEIGHBOUR:
+            # simples ack para manter vivo
+            resp = Message(Message.RESP_NEIGHBOUR, db.get_my_ip(client_address[0]), "")
+            send_message(resp, client_address[0], ROUTERS_RECEIVER_PORT)
+        elif msg.getType() == Message.VIDEO_METRIC_REQUEST:
+            metric_request_handler(msg, db)
+        elif msg.getType() == Message.VIDEO_METRIC_RESPONSE:
+            metric_response_handler(msg, db)
+        elif msg.getType() == Message.VIDEO_METRIC_UPDATE:
+            metric_update_handler(msg, db)
+        elif msg.getType() == Message.PING:
+            ping_handler(msg, db)
+        # ...existing handlers...
+        client_socket.close()
+    
+
+def _store_frame(stream_id: str, frame_num: int, frame_data: bytes):
+    """Armazena frame em buffer simples por stream, limitado a FRAME_BUFFER_SIZE."""
+    with _frame_lock:
+        frames = _frame_buffer.setdefault(stream_id, {})
+        # descarte o mais antigo se ultrapassar limite
+        if len(frames) >= FRAME_BUFFER_SIZE:
+            oldest = min(frames.keys())
+            frames.pop(oldest, None)
+        frames[frame_num] = frame_data
+    print(f"[ONODE][FRAME] stored stream={stream_id} frame={frame_num} size={len(frame_data)}B")
+
+
+def forward_mm(raw_packet: bytes, stream_id: str, sender_ip: str, db: DataBase):
+    """Replica o pacote MM para vizinhos downstream ativos, exceto quem enviou."""
+    try:
+        downstream = [viz for viz in db.get_downstream(stream_id) if viz != sender_ip]
+    except Exception:
+        downstream = []
+
+    if not downstream:
+        return
+
+    udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    for viz in downstream:
+        try:
+            udp_sock.sendto(raw_packet, (viz, SENDER_PORT))
+            log_ev("MM_FWD", stream=stream_id, to=viz, from_=sender_ip)
+        except Exception as e:
+            log_ev("MM_FWD_ERR", stream=stream_id, to=viz, err=e)
+    udp_sock.close()
+
+
+def _normalize_stream(stream_id: str, origin: str | None) -> str:
+    return f"{origin}:{stream_id}" if origin else stream_id
+
+def announce_handler(msg: Message, db: DataBase):
+    try:
+        data = json.loads(msg.data)
+        stream_id = data.get("stream_id")
+        origin = data.get("origin", "")
+        cost = float(data.get("cost", 0))
+        ttl = int(data.get("ttl", 0))
+        msg_id = data.get("msg_id")
+    except Exception as e:
+        print(f"[ONODE][ANNOUNCE][DROP] parse: {e}")
+        return
+
+    if not stream_id or not msg_id or ttl < 0:
+        return
+
+    # chave composta
+    stream_key = _normalize_stream(stream_id, origin)
+
+    if db.mark_seen(msg_id, stream_key):
+        return
+
+    sender_ip = msg.src
+    db.touch_neighbor(sender_ip)
+    new_cost = cost + 1
+    db.hysteresis_factor = HYST_FACTOR
+    improved = db.update_announce(stream_key, new_cost, sender_ip)
+    if improved:
+        log_ev("ANN_UPD", stream=stream_key, parent=sender_ip, cost=new_cost)
+        if stream_key not in db.available_streams:
+            db.addStream(stream_key, sender_ip)
+
+    if ttl > 0 and improved:
+        fwd_payload = json.dumps({
+            "stream_id": stream_id,
+            "origin": origin,
+            "cost": new_cost,
+            "ttl": ttl - 1,
+            "msg_id": msg_id
+        })
+        for viz in db.get_vizinhos():
+            if viz == sender_ip:
+                continue
+            m = Message(ANNOUNCE_TYPE, db.my_ip, fwd_payload)
+            send_message(m, viz, ROUTERS_RECEIVER_PORT)
+            log_ev("ANN_FWD", stream=stream_key, cost=new_cost, ttl=ttl-1, to=viz)
+
+def measure_rtt(host: str, port: int = ROUTERS_RECEIVER_PORT, timeout: float = 1.0) -> float:
+    """Mede RTT aproximado até host:port em ms; retorna valor alto em caso de erro."""
+    try:
+        t0 = time.time()
+        with socket.create_connection((host, port), timeout=timeout):
+            pass
+        return (time.time() - t0) * 1000.0
+    except Exception:
+        return 1_000_000.0
+
+def heartbeat_sender(db: DataBase):
+    """Envia heartbeats leves aos vizinhos para manter last_seen atualizado."""
+    while True:
+        for viz in db.get_vizinhos():
+            msg = Message(Message.ADD_NEIGHBOUR, db.get_my_ip(viz), "")
+            send_message(msg, viz, ROUTERS_RECEIVER_PORT)
+        time.sleep(HEARTBEAT_INTERVAL)
+
+def heartbeat_check(db: DataBase):
+    """Verifica timeouts de vizinhos; se offline, invalida parents e streams."""
+    while True:
+        dead = []
+        for viz in db.get_vizinhos():
+            if not db.is_neighbor_alive(viz, HEARTBEAT_TIMEOUT):
+                dead.append(viz)
+        if dead:
+            affected_streams = set()
+            with db.lock:
+                for viz in dead:
+                    if viz in db.vizinhos_inicializados:
+                        db.vizinhos_inicializados[viz] = 0
+
+                    # remove entradas de downstream e active_streams_table
+                    for stream_id, ds in list(db.downstream.items()):
+                        if viz in ds:
+                            ds.discard(viz)
+                            if not ds:
+                                db.downstream.pop(stream_id, None)
+                            affected_streams.add(stream_id)
+
+                    if viz in db.active_streams_table:
+                        db.active_streams_table[viz].clear()
+
+                    to_reset = [s for s, p in db.best_parent.items() if p == viz]
+                    for s in to_reset:
+                        db.best_parent.pop(s, None)
+                        db.best_cost[s] = math.inf  # reset para aceitar anúncio seguinte mesmo com custo maior
+                        affected_streams.add(s)
+
+                    print(f"[HEARTBEAT] vizinho {viz} OFF; parents reset={to_reset}")
+
+            # Fora do lock: tenta recalc e reenviar STREAM_REQUEST para streams afetadas
+            for stream_id in affected_streams:
+                parent = _upstream_for(stream_id, db)
+                if parent and parent not in dead:
+                    msg = Message(Message.STREAM_REQUEST, db.get_my_ip(parent), stream_id)
+                    send_message(msg, parent, RECEIVER_PORT)
+                    log_ev("HB_REROUTE", stream=stream_id, new_parent=parent)
+        time.sleep(HEARTBEAT_INTERVAL)
+
+
+
+# =============================================================
+#                      PRINCIPAL THREADS
+# =============================================================
+
+def data_listener(db: DataBase):
+    """Escuta pacotes de dados via UDP (SimplePacket) e faz forwarding conforme downstream ativos."""
+    print("Data listener thread started (UDP)")
+    udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    udp_sock.bind(('', SENDER_PORT))
 
     while True:
         try:
-            conn, addr = sckt.accept()
-            
-            def handle_router_connection():
-                try:
-                    buffer = b''
-                    while True:
-                        chunk = conn.recv(4096)
-                        if not chunk:
-                            break
-                        buffer += chunk
-                        while b'\n' in buffer:
-                            dados, buffer = buffer.split(b'\n', 1)
-                            if dados:
-                                msg = Message.deserialize(dados)
-                                msgr_ip = msg.getSrc()
-                                typeOfMsg = msg.getType()
-                                if typeOfMsg == Message.ADD_NEIGHBOUR:
-                                    print(f"[ONODE][CNTRL] ADD_NEIGHBOUR from {msgr_ip}")
-                                    threading.Thread(target=db.inicializaVizinho, args=(msgr_ip,)).start()
-                                    msg_resp = Message(Message.RESP_NEIGHBOUR, db.get_my_ip(msgr_ip), "")
+            raw, addr = udp_sock.recvfrom(65535)
+            sender_ip = addr[0]
 
-                                    success = False
-                                    for attempt in range(MAX_RETRIES):
-                                        try:
-                                            _send_buffer(conn, msg_resp.serialize() + b'\n')
-                                            success = True
-                                            break
-                                        except Exception as e:
-                                            if attempt < MAX_RETRIES - 1:
-                                                print(f"Attempt {attempt + 1} failed to send RESP_NEIGHBOUR to {msgr_ip}, retrying...")
-                                            else:
-                                                print(f"ERROR: Failed to send RESP_NEIGHBOUR to {msgr_ip} after {MAX_RETRIES} attempts - {e}")
-                                    
-                                    if not success:
-                                       print(f"RESP_NEIGHBOUR to {msgr_ip} discarded after {MAX_RETRIES} failed attempts.")
-                                       break 
-                                elif typeOfMsg == Message.RESP_NEIGHBOUR:
-                                    threading.Thread(target=db.inicializaVizinho, args=(msgr_ip,)).start()
-                                elif typeOfMsg == Message.VIDEO_METRIC_REQUEST:
-                                    threading.Thread(target=metric_request_handler, args=(msg, db)).start()
-                                elif typeOfMsg == Message.VIDEO_METRIC_RESPONSE:
-                                    threading.Thread(target=metric_response_handler, args=(msg, db)).start()
-                                elif typeOfMsg == Message.VIDEO_METRIC_UPDATE:
-                                    threading.Thread(target=metric_update_handler, args=(msg, db)).start()
-                except Exception as e:
-                    print("Error in router connection: ", e)
-                finally:
-                    conn.close()
-            
-            threading.Thread(target=handle_router_connection, daemon=True).start()
+            try:
+                pkt = SimplePacket.decode(raw)
+            except Exception as e:
+                print(f"[ONODE][MM][DROP] decode fail from {sender_ip}: {e}")
+                continue
+
+            stream_num = pkt.get_stream_id()
+            frame_num = pkt.get_frame_num()
+            payload = pkt.get_payload()
+
+            if b'\0' not in payload:
+                print(f"[ONODE][MM][DROP] malformed payload from {sender_ip}")
+                continue
+            stream_id_bytes, frame_bytes = payload.split(b'\0', 1)
+            try:
+                stream_id = stream_id_bytes.decode('utf-8')  # já pode ser "S1:stream3"
+            except Exception:
+                print(f"[ONODE][MM][DROP] bad stream_id bytes from {sender_ip}")
+                continue
+
+            # Valida origem esperada (best_parent)
+            upstream = db.get_best_parent(stream_id) or db.getStreamSource(stream_id)
+            if upstream and upstream != sender_ip:
+                print(f"[ONODE][MM][DROP] unexpected upstream for {stream_id}: got {sender_ip}, expect {upstream}")
+                continue
+
+            print(f"[ONODE][MM][RX] stream={stream_id} frame={frame_num} from={sender_ip} size={len(frame_bytes)}B")
+
+            # Se não há downstream ativo, assume nó folha/cliente e guarda frame
+            try:
+                downstream_active = db.has_downstream(stream_id)
+            except Exception:
+                downstream_active = False
+
+            if not downstream_active:
+                _store_frame(stream_id, frame_num, frame_bytes)
+
+            forward_mm(raw, stream_id, sender_ip, db)
+
         except Exception as e:
-            print("Error in listener: ", e)
-            break
-    sckt.close()
-
-
+            print(f"[ONODE][MM][ERR] {e}")
+            continue
 def main():
     sys.stdout.write(f"\033]0;{socket.gethostname()}\007")
     sys.stdout.flush()
@@ -464,8 +687,11 @@ def main():
     thread_listen = threading.Thread(target=listener, args=(db,))
     thread_sender = threading.Thread(target=sender, args=(db,))
     thread_cntrl = threading.Thread(target=cntrl, args=(db,))
+    thread_data = threading.Thread(target=data_listener, args=(db,))
+    thread_hb = threading.Thread(target=heartbeat_sender, args=(db,))
+    thread_hbchk = threading.Thread(target=heartbeat_check, args=(db,))
 
-    all_threads = [thread_listen, thread_sender, thread_cntrl]
+    all_threads = [thread_listen, thread_sender, thread_cntrl, thread_data, thread_hb, thread_hbchk]
 
     for t in all_threads:
         t.daemon = True

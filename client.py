@@ -3,6 +3,14 @@ import sys, json
 from msg import Message
 from database import DataBase
 from onode import send_message
+import threading, time
+from SimplePacket import SimplePacket
+
+SENDER_PORT = 40332  # porta de receção UDP de dados (MM)
+
+_frame_buffer = {}
+_frame_lock = threading.Lock()
+_running = True
 
 def get_node_info(clientName):
     db = DataBase(clientName)
@@ -104,6 +112,69 @@ def requestStream(node_host, node_port, client_name, stream_number):
         print("Error requesting stream:", e)
         return "Request failed."
 
+def udp_listener():
+    """Escuta frames via UDP (SimplePacket) e armazena por frame_num."""
+    udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    udp_sock.bind(('', SENDER_PORT))
+    print(f"[CLIENT][UDP] listening on 0.0.0.0:{SENDER_PORT}")
+
+    while _running:
+        try:
+            raw, addr = udp_sock.recvfrom(65535)
+            try:
+                pkt = SimplePacket.decode(raw)
+            except Exception as e:
+                print(f"[CLIENT][UDP][DROP] decode: {e}")
+                continue
+
+            payload = pkt.get_payload()
+            if b'\0' not in payload:
+                print("[CLIENT][UDP][DROP] malformed payload (no NUL)")
+                continue
+            stream_id_b, frame_b = payload.split(b'\0', 1)
+            try:
+                stream_id = stream_id_b.decode('utf-8')
+            except Exception:
+                print("[CLIENT][UDP][DROP] bad stream_id bytes")
+                continue
+
+            frame_num = pkt.get_frame_num()
+            with _frame_lock:
+                buf = _frame_buffer.setdefault(stream_id, {})
+                buf[frame_num] = frame_b
+                # Limita buffer a 200 frames
+                if len(buf) > 200:
+                    oldest = min(buf.keys())
+                    buf.pop(oldest, None)
+
+            print(f"[CLIENT][UDP][RX] stream={stream_id} frame={frame_num} size={len(frame_b)}B from={addr[0]}")
+        except OSError:
+            break
+        except Exception as e:
+            print(f"[CLIENT][UDP][ERR] {e}")
+    udp_sock.close()
+
+def send_stream_stop(node_host, node_port, client_name, stream_number):
+    try:
+        source = get_client_ip(client_name)
+        if not source:
+            return
+        msg = Message(Message.STREAM_STOP, source, stream_number)
+        send_tcp_request(node_host, node_port, msg)
+        print(f"[CLIENT] STREAM_STOP sent for {stream_number}")
+    except Exception as e:
+        print(f"[CLIENT] STREAM_STOP error: {e}")
+
+def send_ping(node_host, node_port, client_name, stream_id, ttl=8):
+    source = get_client_ip(client_name)
+    if not source:
+        return "Client IP not found."
+    payload = json.dumps({"stream_id": stream_id, "ttl": ttl, "path": []})
+    msg = Message(Message.PING, source, payload)
+    send_tcp_request(node_host, node_port, msg)
+    return "PING sent."
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python3 client.py <clientName>")
@@ -112,40 +183,48 @@ def main():
     clientName = sys.argv[1]
     print(f"Client {clientName} initialized")
 
-    #Verificar qual node correspondente
     node_host, node_port = get_node_info(clientName)
     if not node_host:
         print(f"No node information found for client {clientName}")
         sys.exit(1)
 
-    print("Connecting to node at {}:{}".format(node_host, node_port))
+    # Inicia listener UDP de frames
+    t_udp = threading.Thread(target=udp_listener, daemon=True)
+    t_udp.start()
 
-    print("Trying to receive streams available from node...")
     streams = get_available_streams(node_host, node_port, clientName)
-
     if not streams:
         print("No streams received from node.")
-        sys.exit(1)
+        return
 
     print("\nAvailable streams:")
     for stream in streams:
         print(f"Stream {stream}")
 
-    while True:
-        try:
-            stream_choice = input("Select a stream by name (or 'quit' to exit): ")
+    current_stream = None
+    try:
+        while True:
+            stream_choice = input("Select a stream by name (or 'quit' to exit, 'ping <stream>' to ping): ")
             if stream_choice.lower() == 'quit':
-                print("Exiting.")
                 break
-
+            if stream_choice.lower().startswith("ping "):
+                sid = stream_choice.split(None, 1)[1].strip()
+                print(send_ping(node_host, node_port, clientName, sid))
+                continue
             print(f"Requesting stream: {stream_choice}")
             response = requestStream(node_host, node_port, clientName, stream_choice)
+            current_stream = stream_choice
             print("Response from node:", response)
-        except KeyboardInterrupt:
-            print("\nExiting.")
-            break
-        except Exception as e:
-            print("An error occurred:", e)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        global _running
+        _running = False
+        # Envia STREAM_STOP se havia uma stream selecionada
+        if current_stream:
+            send_stream_stop(node_host, node_port, clientName, current_stream)
+        # dá tempo para fechar o UDP
+        time.sleep(0.5)
 
 if __name__ == '__main__':
     main()
