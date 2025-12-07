@@ -452,27 +452,33 @@ def cntrl(db:DataBase):
         try:
             msg = Message.deserialize(data.decode('utf-8'))
         except Exception as e:
+            print(f"[ONODE][CNTRL] Error deserializing message: {e}")
             client_socket.close()
             continue
 
         # marca neighbor vivo em qualquer mensagem de controle
         db.touch_neighbor(client_address[0])
 
-        if msg.getType() == ANNOUNCE_TYPE:
-            announce_handler(msg, db)
-        elif msg.getType() == Message.ADD_NEIGHBOUR:
-            # simples ack para manter vivo
-            resp = Message(Message.RESP_NEIGHBOUR, db.get_my_ip(client_address[0]), "")
-            send_message(resp, client_address[0], ROUTERS_RECEIVER_PORT)
-        elif msg.getType() == Message.VIDEO_METRIC_REQUEST:
-            metric_request_handler(msg, db)
-        elif msg.getType() == Message.VIDEO_METRIC_RESPONSE:
-            metric_response_handler(msg, db)
-        elif msg.getType() == Message.VIDEO_METRIC_UPDATE:
-            metric_update_handler(msg, db)
-        elif msg.getType() == Message.PING:
-            ping_handler(msg, db)
-        # ...existing handlers...
+        try:
+            if msg.getType() == ANNOUNCE_TYPE:
+                announce_handler(msg, db)
+            elif msg.getType() == Message.ADD_NEIGHBOUR:
+                # simples ack para manter vivo
+                resp = Message(Message.RESP_NEIGHBOUR, db.get_my_ip(client_address[0]), "")
+                send_message(resp, client_address[0], ROUTERS_RECEIVER_PORT)
+            elif msg.getType() == Message.VIDEO_METRIC_REQUEST:
+                metric_request_handler(msg, db)
+            elif msg.getType() == Message.VIDEO_METRIC_RESPONSE:
+                metric_response_handler(msg, db)
+            elif msg.getType() == Message.VIDEO_METRIC_UPDATE:
+                metric_update_handler(msg, db)
+            elif msg.getType() == Message.PING:
+                ping_handler(msg, db)
+        except Exception as e:
+            print(f"[ONODE][CNTRL] Error handling message type {msg.getType()}: {e}")
+            import traceback
+            traceback.print_exc()
+        
         client_socket.close()
     
 

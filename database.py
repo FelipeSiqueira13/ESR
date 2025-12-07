@@ -49,6 +49,18 @@ class DataBase():
 
         self.pending_metric_requests = {}
 
+    def store_metric_request(self, request_id, data):
+        with self.lock:
+            self.pending_metric_requests[request_id] = data
+
+    def get_metric_request(self, request_id):
+        with self.lock:
+            return self.pending_metric_requests.get(request_id)
+
+    def remove_metric_request(self, request_id):
+        with self.lock:
+            self.pending_metric_requests.pop(request_id, None)
+
     def get_vizinhos(self):
         """Retorna apenas os endereços"""
         return list(self.vizinhos)
