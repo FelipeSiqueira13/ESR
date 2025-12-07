@@ -6,6 +6,7 @@ import datetime as dt
 import json, uuid
 import math
 import time
+from typing import Optional
 from database import DataBase
 from msg import Message
 from SimplePacket import SimplePacket
@@ -507,7 +508,7 @@ def forward_mm(raw_packet: bytes, stream_id: str, sender_ip: str, db: DataBase):
     udp_sock.close()
 
 
-def _normalize_stream(stream_id: str, origin: str | None) -> str:
+def _normalize_stream(stream_id: str, origin: Optional[str]) -> str:
     return f"{origin}:{stream_id}" if origin else stream_id
 
 def announce_handler(msg: Message, db: DataBase):
