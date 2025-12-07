@@ -113,8 +113,9 @@ class DataBase():
     def activateStream(self, viz, stream_id):
         with self.lock:
             if stream_id in self.available_streams and viz in self.active_streams_table:
+                # Use .get() to avoid KeyError if stream_id is missing for some neighbor
                 already_active = any(
-                    self.active_streams_table[v][stream_id] == 1 for v in self.vizinhos
+                    self.active_streams_table[v].get(stream_id, 0) == 1 for v in self.vizinhos
                 )
                 self.active_streams_table[viz][stream_id] = 1
                 print(f"Stream {stream_id} activated for neighbour {viz}.\n")
