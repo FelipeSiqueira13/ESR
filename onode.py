@@ -131,8 +131,12 @@ def update_metrics(streams_id:list, metric, db:DataBase, viz):
 def metric_request_handler(msg: Message, db: DataBase):
     try:
         payload = msg.metrics_decode()
-    except Exception:
+    except Exception as e:
+        print(f"[ONODE][METRIC_REQ] Error decoding metrics: {e}")
+        import traceback
+        traceback.print_exc()
         return
+
     request_id = payload.get("request_id")
     start_time = payload.get("start_time")
     streams = payload.get("streams", [])
@@ -449,52 +453,53 @@ def cntrl(db:DataBase):
     while True:
         client_socket, client_address = sckt.accept()
         try:
-            data = client_socket.recv(4096)
-            if not data:
-                client_socket.close()
-                continue
-            
-            print(f"[DEBUG] Recv from {client_address}: {data} (Type: {type(data)})")
+            buffer = b""
+            while True:
+                data = client_socket.recv(4096)
+                if not data:
+                    break
+                
+                # print(f"[DEBUG] Recv from {client_address}: {data} (Type: {type(data)})")
+                buffer += data
 
-            # Processa buffer procurando por delimitador \n
-            buffer = data
-            while b'\n' in buffer:
-                msg_bytes, buffer = buffer.split(b'\n', 1)
-                if not msg_bytes:
-                    continue
+                # Processa buffer procurando por delimitador \n
+                while b'\n' in buffer:
+                    msg_bytes, buffer = buffer.split(b'\n', 1)
+                    if not msg_bytes:
+                        continue
 
-                print(f"[DEBUG] Deserializing: {msg_bytes} (Type: {type(msg_bytes)})")
+                    # print(f"[DEBUG] Deserializing: {msg_bytes} (Type: {type(msg_bytes)})")
 
-                try:
-                    msg = Message.deserialize(msg_bytes)
-                except Exception as e:
-                    print(f"[ONODE][CNTRL] Error deserializing message: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    continue
+                    try:
+                        msg = Message.deserialize(msg_bytes)
+                    except Exception as e:
+                        print(f"[ONODE][CNTRL] Error deserializing message: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        continue
 
-                # marca neighbor vivo em qualquer mensagem de controle
-                db.touch_neighbor(client_address[0])
+                    # marca neighbor vivo em qualquer mensagem de controle
+                    db.touch_neighbor(client_address[0])
 
-                try:
-                    if msg.getType() == ANNOUNCE_TYPE:
-                        announce_handler(msg, db)
-                    elif msg.getType() == Message.ADD_NEIGHBOUR:
-                        # simples ack para manter vivo
-                        resp = Message(Message.RESP_NEIGHBOUR, db.get_my_ip(client_address[0]), "")
-                        send_message(resp, client_address[0], ROUTERS_RECEIVER_PORT)
-                    elif msg.getType() == Message.VIDEO_METRIC_REQUEST:
-                        metric_request_handler(msg, db)
-                    elif msg.getType() == Message.VIDEO_METRIC_RESPONSE:
-                        metric_response_handler(msg, db)
-                    elif msg.getType() == Message.VIDEO_METRIC_UPDATE:
-                        metric_update_handler(msg, db)
-                    elif msg.getType() == Message.PING:
-                        ping_handler(msg, db)
-                except Exception as e:
-                    print(f"[ONODE][CNTRL] Error handling message type {msg.getType()}: {e}")
-                    import traceback
-                    traceback.print_exc()
+                    try:
+                        if msg.getType() == ANNOUNCE_TYPE:
+                            announce_handler(msg, db)
+                        elif msg.getType() == Message.ADD_NEIGHBOUR:
+                            # simples ack para manter vivo
+                            resp = Message(Message.RESP_NEIGHBOUR, db.get_my_ip(client_address[0]), "")
+                            send_message(resp, client_address[0], ROUTERS_RECEIVER_PORT)
+                        elif msg.getType() == Message.VIDEO_METRIC_REQUEST:
+                            metric_request_handler(msg, db)
+                        elif msg.getType() == Message.VIDEO_METRIC_RESPONSE:
+                            metric_response_handler(msg, db)
+                        elif msg.getType() == Message.VIDEO_METRIC_UPDATE:
+                            metric_update_handler(msg, db)
+                        elif msg.getType() == Message.PING:
+                            ping_handler(msg, db)
+                    except Exception as e:
+                        print(f"[ONODE][CNTRL] Error handling message type {msg.getType()}: {e}")
+                        import traceback
+                        traceback.print_exc()
         
         except Exception as e:
             print(f"[ONODE][CNTRL] Socket error: {e}")
