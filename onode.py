@@ -368,10 +368,15 @@ def listener(db:DataBase):
                                     _send_buffer(conn, resp.serialize() + b'\n')
                                 
                                 elif typeOfMsg == Message.STREAM_REQUEST:
-                                    threading.Thread(target=stream_pls_handler, args=(msg, db)).start()
-                                    # Ack imediato para liberar o cliente
-                                    resp = Message(Message.STREAM_REQUEST, db.get_my_ip(addr[0]), "OK")
-                                    _send_buffer(conn, resp.serialize() + b'\n')
+                                    stream_id = msg.getData()
+                                    if stream_id in db.get_streams():
+                                        threading.Thread(target=stream_pls_handler, args=(msg, db)).start()
+                                        # Ack imediato para liberar o cliente
+                                        resp = Message(Message.STREAM_REQUEST, db.get_my_ip(addr[0]), "OK")
+                                        _send_buffer(conn, resp.serialize() + b'\n')
+                                    else:
+                                        resp = Message(Message.STREAM_REQUEST, db.get_my_ip(addr[0]), "Stream not found")
+                                        _send_buffer(conn, resp.serialize() + b'\n')
 
                                 elif typeOfMsg == Message.STREAM_STOP:
                                     threading.Thread(target=stream_no_handler, args=(msg, db)).start()

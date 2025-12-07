@@ -213,8 +213,9 @@ def main():
                 continue
             print(f"Requesting stream: {stream_choice}")
             response = requestStream(node_host, node_port, clientName, stream_choice)
-            current_stream = stream_choice
             print("Response from node:", response)
+            if response == "OK":
+                current_stream = stream_choice
     except KeyboardInterrupt:
         pass
     finally:
