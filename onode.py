@@ -449,8 +449,12 @@ def cntrl(db:DataBase):
     while True:
         client_socket, client_address = sckt.accept()
         data = client_socket.recv(4096)
+        if not data:
+            client_socket.close()
+            continue
+            
         try:
-            msg = Message.deserialize(data.decode('utf-8'))
+            msg = Message.deserialize(data)
         except Exception as e:
             print(f"[ONODE][CNTRL] Error deserializing message: {e}")
             client_socket.close()
