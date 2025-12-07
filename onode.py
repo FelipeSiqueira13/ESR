@@ -360,12 +360,34 @@ def listener(db:DataBase):
                                 msg = Message.deserialize(dados)
                                 typeOfMsg = msg.getType() 
                                 print(f"[ONODE][LISTENER] from={addr[0]} type={typeOfMsg} data={msg.getData()}")
-                                if typeOfMsg == Message.STREAM_REQUEST:
+                                
+                                if typeOfMsg == Message.STREAMS_AVAILABLE:
+                                    streams = db.get_streams()
+                                    data = ",".join(streams) if streams else "No streams available"
+                                    resp = Message(Message.RESP_STREAMS_AVAILABLE, db.get_my_ip(addr[0]), data)
+                                    _send_buffer(conn, resp.serialize() + b'\n')
+                                
+                                elif typeOfMsg == Message.STREAM_REQUEST:
                                     threading.Thread(target=stream_pls_handler, args=(msg, db)).start()
+                                    # Ack imediato para liberar o cliente
+                                    resp = Message(Message.STREAM_REQUEST, db.get_my_ip(addr[0]), "OK")
+                                    _send_buffer(conn, resp.serialize() + b'\n')
+
                                 elif typeOfMsg == Message.STREAM_STOP:
                                     threading.Thread(target=stream_no_handler, args=(msg, db)).start()
-                                elif typeOfMsg == Message.STREAMS_AVAILABLE:
-                                    threading.Thread(target=streams_available_handler, args=(msg, db)).start()
+                                    # Ack imediato
+                                    resp = Message(Message.STREAM_STOP, db.get_my_ip(addr[0]), "OK")
+                                    _send_buffer(conn, resp.serialize() + b'\n')
+
+                                elif typeOfMsg == Message.PING:
+                                    threading.Thread(target=ping_handler, args=(msg, db)).start()
+                                    # Ack para o ping não travar o cliente
+                                    resp = Message(Message.PING, db.get_my_ip(addr[0]), "PING_ACK")
+                                    _send_buffer(conn, resp.serialize() + b'\n')
+
+                                else:
+                                    # Outros tipos (ex: mensagens antigas)
+                                    pass
                 except Exception as e:
                     print("Error handling connection: ", e)
                 finally:
