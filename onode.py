@@ -443,6 +443,68 @@ def ping_handler(msg: Message, db: DataBase):
         print(f"[PING][END] stream={stream_id} path={path}")
             
 
+def handle_control_client(client_socket, client_address, db: DataBase):
+    try:
+        client_socket.settimeout(10.0)
+        buffer = b""
+        while True:
+            try:
+                data = client_socket.recv(4096)
+            except socket.timeout:
+                # print(f"[ONODE][CNTRL] Timeout reading from {client_address}")
+                break
+            except Exception as e:
+                # print(f"[ONODE][CNTRL] Recv error from {client_address}: {e}")
+                break
+
+            if not data:
+                break
+            
+            buffer += data
+
+            # Processa buffer procurando por delimitador \n
+            while b'\n' in buffer:
+                msg_bytes, buffer = buffer.split(b'\n', 1)
+                if not msg_bytes:
+                    continue
+
+                try:
+                    msg = Message.deserialize(msg_bytes)
+                except Exception as e:
+                    print(f"[ONODE][CNTRL] Error deserializing message: {e}")
+                    continue
+
+                # marca neighbor vivo em qualquer mensagem de controle
+                db.touch_neighbor(client_address[0])
+
+                try:
+                    # if msg.getType() == ANNOUNCE_TYPE:
+                    #     announce_handler(msg, db)
+                    if msg.getType() == Message.ADD_NEIGHBOUR:
+                        # simples ack para manter vivo
+                        resp = Message(Message.RESP_NEIGHBOUR, db.get_my_ip(client_address[0]), "")
+                        send_message(resp, client_address[0], ROUTERS_RECEIVER_PORT)
+                    elif msg.getType() == Message.VIDEO_METRIC_REQUEST:
+                        metric_request_handler(msg, db)
+                    elif msg.getType() == Message.VIDEO_METRIC_RESPONSE:
+                        metric_response_handler(msg, db)
+                    elif msg.getType() == Message.VIDEO_METRIC_UPDATE:
+                        metric_update_handler(msg, db)
+                    elif msg.getType() == Message.PING:
+                        ping_handler(msg, db)
+                except Exception as e:
+                    print(f"[ONODE][CNTRL] Error handling message type {msg.getType()}: {e}")
+                    import traceback
+                    traceback.print_exc()
+    
+    except Exception as e:
+        print(f"[ONODE][CNTRL] Connection handler error: {e}")
+    finally:
+        try:
+            client_socket.close()
+        except:
+            pass
+
 def cntrl(db:DataBase):
     print("Control thread started")
     sckt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -453,73 +515,12 @@ def cntrl(db:DataBase):
     while True:
         try:
             client_socket, client_address = sckt.accept()
-            # print(f"[ONODE][CNTRL] Accepted connection from {client_address}")
-            client_socket.settimeout(10.0) # Timeout para evitar travamento
+            t = threading.Thread(target=handle_control_client, args=(client_socket, client_address, db), daemon=True)
+            t.start()
         except Exception as e:
             print(f"[ONODE][CNTRL] Accept error: {e}")
             time.sleep(1)
             continue
-
-        try:
-            buffer = b""
-            while True:
-                try:
-                    data = client_socket.recv(4096)
-                except socket.timeout:
-                    print(f"[ONODE][CNTRL] Timeout reading from {client_address}")
-                    break
-                except Exception as e:
-                    # print(f"[ONODE][CNTRL] Recv error from {client_address}: {e}")
-                    break
-
-                if not data:
-                    break
-                
-                buffer += data
-
-                # Processa buffer procurando por delimitador \n
-                while b'\n' in buffer:
-                    msg_bytes, buffer = buffer.split(b'\n', 1)
-                    if not msg_bytes:
-                        continue
-
-                    try:
-                        msg = Message.deserialize(msg_bytes)
-                    except Exception as e:
-                        print(f"[ONODE][CNTRL] Error deserializing message: {e}")
-                        continue
-
-                    # marca neighbor vivo em qualquer mensagem de controle
-                    db.touch_neighbor(client_address[0])
-
-                    try:
-                        # if msg.getType() == ANNOUNCE_TYPE:
-                        #     announce_handler(msg, db)
-                        if msg.getType() == Message.ADD_NEIGHBOUR:
-                            # simples ack para manter vivo
-                            resp = Message(Message.RESP_NEIGHBOUR, db.get_my_ip(client_address[0]), "")
-                            send_message(resp, client_address[0], ROUTERS_RECEIVER_PORT)
-                        elif msg.getType() == Message.VIDEO_METRIC_REQUEST:
-                            metric_request_handler(msg, db)
-                        elif msg.getType() == Message.VIDEO_METRIC_RESPONSE:
-                            metric_response_handler(msg, db)
-                        elif msg.getType() == Message.VIDEO_METRIC_UPDATE:
-                            metric_update_handler(msg, db)
-                        elif msg.getType() == Message.PING:
-                            ping_handler(msg, db)
-                    except Exception as e:
-                        print(f"[ONODE][CNTRL] Error handling message type {msg.getType()}: {e}")
-                        import traceback
-                        traceback.print_exc()
-        
-        except Exception as e:
-            print(f"[ONODE][CNTRL] Connection handler error: {e}")
-        finally:
-            try:
-                client_socket.close()
-            except:
-                pass
-            # print(f"[ONODE][CNTRL] Closed connection from {client_address}")
     
 
 def _store_frame(stream_id: str, frame_num: int, frame_data: bytes):
