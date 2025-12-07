@@ -6,26 +6,11 @@ from onode import send_message
 import threading, time
 from SimplePacket import SimplePacket
 
-try:
-    import tkinter as tk
-    from PIL import Image, ImageTk
-    import io
-    HAS_GUI = True
-except ImportError:
-    HAS_GUI = False
-    print("Warning: PIL or tkinter not found. Video playback disabled.")
-
 SENDER_PORT = 40332  # porta de receção UDP de dados (MM)
 
 _frame_buffer = {}
 _frame_lock = threading.Lock()
 _running = True
-current_stream = None  # Global variable for the active stream
-_stats = {
-    "stream_id": "None",
-    "fps": 0,
-    "last_frame": 0
-}
 
 def get_node_info(clientName):
     db = DataBase(clientName)
@@ -134,26 +119,24 @@ def udp_listener():
     udp_sock.bind(('', SENDER_PORT))
     print(f"[CLIENT][UDP] listening on 0.0.0.0:{SENDER_PORT}")
 
-    last_log_time = time.time()
-    frames_in_interval = 0
-
     while _running:
         try:
             raw, addr = udp_sock.recvfrom(65535)
             try:
                 pkt = SimplePacket.decode(raw)
             except Exception as e:
-                # print(f"[CLIENT][UDP][DROP] decode: {e}")
+                print(f"[CLIENT][UDP][DROP] decode: {e}")
                 continue
 
             payload = pkt.get_payload()
             if b'\0' not in payload:
-                # print("[CLIENT][UDP][DROP] malformed payload (no NUL)")
+                print("[CLIENT][UDP][DROP] malformed payload (no NUL)")
                 continue
             stream_id_b, frame_b = payload.split(b'\0', 1)
             try:
                 stream_id = stream_id_b.decode('utf-8')
             except Exception:
+                print("[CLIENT][UDP][DROP] bad stream_id bytes")
                 continue
 
             frame_num = pkt.get_frame_num()
@@ -165,17 +148,9 @@ def udp_listener():
                     oldest = min(buf.keys())
                     buf.pop(oldest, None)
 
-            # Atualiza estatísticas globais a cada 1.0 segundo
-            frames_in_interval += 1
-            now = time.time()
-            if now - last_log_time > 1.0:
-                _stats["stream_id"] = stream_id
-                _stats["fps"] = frames_in_interval
-                _stats["last_frame"] = frame_num
-                
-                frames_in_interval = 0
-                last_log_time = now
-
+            # Reduz verbosidade: imprime apenas a cada 60 frames (aprox 2s)
+            if frame_num % 60 == 0:
+                print(f"[CLIENT][UDP][RX] stream={stream_id} frame={frame_num} size={len(frame_b)}B from={addr[0]}")
         except OSError:
             break
         except Exception as e:
@@ -202,65 +177,7 @@ def send_ping(node_host, node_port, client_name, stream_id, ttl=8):
     send_tcp_request(node_host, node_port, msg)
     return "PING sent."
 
-class VideoPlayer:
-    def __init__(self):
-        self.root = tk.Tk()
-        self.root.title("ESR Video Player")
-        self.label = tk.Label(self.root, text="Waiting for stream...")
-        self.label.pack()
-        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
-        self.current_frame_num = -1
-        self.update_loop()
-    
-    def update_loop(self):
-        global current_stream, _frame_buffer, _frame_lock, _running
-        
-        if not _running:
-            self.root.destroy()
-            return
-
-        if current_stream:
-            with _frame_lock:
-                if current_stream in _frame_buffer:
-                    buf = _frame_buffer[current_stream]
-                    if buf:
-                        # Simple strategy: get the latest frame available
-                        # This ensures low latency for live streaming
-                        latest_frame_num = max(buf.keys())
-                        
-                        if latest_frame_num > self.current_frame_num:
-                            frame_data = buf[latest_frame_num]
-                            self.current_frame_num = latest_frame_num
-                            
-                            try:
-                                image = Image.open(io.BytesIO(frame_data))
-                                photo = ImageTk.PhotoImage(image)
-                                self.label.configure(image=photo, text="")
-                                self.label.image = photo
-                            except Exception as e:
-                                print(f"Error decoding frame: {e}")
-                            
-                            # Cleanup old frames to save memory
-                            # Keep only the last 20 frames
-                            to_remove = [k for k in buf.keys() if k < latest_frame_num - 20]
-                            for k in to_remove:
-                                del buf[k]
-        
-        self.root.after(30, self.update_loop) # ~33 FPS check
-
-    def start(self):
-        self.root.mainloop()
-        
-    def on_close(self):
-        global _running
-        _running = False
-        self.root.destroy()
-        # Force exit to kill console thread
-        import os
-        os._exit(0)
-
 def main():
-    global current_stream, _running
     if len(sys.argv) < 2:
         print("Usage: python3 client.py <clientName>")
         sys.exit(1)
@@ -280,66 +197,37 @@ def main():
     streams = get_available_streams(node_host, node_port, clientName)
     if not streams:
         print("No streams received from node.")
-        # return # Don't return, allow running to see logs or wait
+        return
 
     print("\nAvailable streams:")
     for stream in streams:
         print(f"Stream {stream}")
 
-    def console_loop():
-        global current_stream, _running
-        try:
-            while _running:
-                stream_choice = input("Select stream, 'monitor' for stats, 'quit' to exit, 'ping <stream>': ")
-                if stream_choice.lower() == 'quit':
-                    _running = False
-                    break
-                
-                if stream_choice.lower() == 'monitor':
-                    print("Monitoring stats... Press Ctrl+C to stop.")
-                    try:
-                        while _running:
-                            print(f"Stream: {_stats['stream_id']} | FPS: {_stats['fps']} | LastFrame: {_stats['last_frame']}")
-                            time.sleep(1)
-                    except KeyboardInterrupt:
-                        print("\nStopped monitoring.")
-                    continue
-
-                if stream_choice.lower().startswith("ping "):
-                    sid = stream_choice.split(None, 1)[1].strip()
-                    print(send_ping(node_host, node_port, clientName, sid))
-                    continue
-                
-                print(f"Requesting stream: {stream_choice}")
-                response = requestStream(node_host, node_port, clientName, stream_choice)
-                print("Response from node:", response)
-                if response == "OK":
-                    current_stream = stream_choice
-        except EOFError:
-            pass
-        except KeyboardInterrupt:
-            pass
-        except Exception as e:
-            print(f"Console error: {e}")
-        finally:
-            _running = False
-            # Envia STREAM_STOP se havia uma stream selecionada
-            if current_stream:
-                send_stream_stop(node_host, node_port, clientName, current_stream)
-            # dá tempo para fechar o UDP
-            time.sleep(0.5)
-            if not HAS_GUI:
-                sys.exit(0)
-
-    if HAS_GUI:
-        print("Starting GUI... Console commands are still active.")
-        t_console = threading.Thread(target=console_loop, daemon=True)
-        t_console.start()
-        
-        player = VideoPlayer()
-        player.start()
-    else:
-        console_loop()
+    current_stream = None
+    try:
+        while True:
+            stream_choice = input("Select a stream by name (or 'quit' to exit, 'ping <stream>' to ping): ")
+            if stream_choice.lower() == 'quit':
+                break
+            if stream_choice.lower().startswith("ping "):
+                sid = stream_choice.split(None, 1)[1].strip()
+                print(send_ping(node_host, node_port, clientName, sid))
+                continue
+            print(f"Requesting stream: {stream_choice}")
+            response = requestStream(node_host, node_port, clientName, stream_choice)
+            print("Response from node:", response)
+            if response == "OK":
+                current_stream = stream_choice
+    except KeyboardInterrupt:
+        pass
+    finally:
+        global _running
+        _running = False
+        # Envia STREAM_STOP se havia uma stream selecionada
+        if current_stream:
+            send_stream_stop(node_host, node_port, clientName, current_stream)
+        # dá tempo para fechar o UDP
+        time.sleep(0.5)
 
 if __name__ == '__main__':
     main()
