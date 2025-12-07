@@ -448,42 +448,52 @@ def cntrl(db:DataBase):
 
     while True:
         client_socket, client_address = sckt.accept()
-        data = client_socket.recv(4096)
-        if not data:
-            client_socket.close()
-            continue
+        try:
+            data = client_socket.recv(4096)
+            if not data:
+                client_socket.close()
+                continue
             
-        try:
-            msg = Message.deserialize(data)
-        except Exception as e:
-            print(f"[ONODE][CNTRL] Error deserializing message: {e}")
-            client_socket.close()
-            continue
+            # Processa buffer procurando por delimitador \n
+            buffer = data
+            while b'\n' in buffer:
+                msg_bytes, buffer = buffer.split(b'\n', 1)
+                if not msg_bytes:
+                    continue
 
-        # marca neighbor vivo em qualquer mensagem de controle
-        db.touch_neighbor(client_address[0])
+                try:
+                    msg = Message.deserialize(msg_bytes)
+                except Exception as e:
+                    print(f"[ONODE][CNTRL] Error deserializing message: {e}")
+                    continue
 
-        try:
-            if msg.getType() == ANNOUNCE_TYPE:
-                announce_handler(msg, db)
-            elif msg.getType() == Message.ADD_NEIGHBOUR:
-                # simples ack para manter vivo
-                resp = Message(Message.RESP_NEIGHBOUR, db.get_my_ip(client_address[0]), "")
-                send_message(resp, client_address[0], ROUTERS_RECEIVER_PORT)
-            elif msg.getType() == Message.VIDEO_METRIC_REQUEST:
-                metric_request_handler(msg, db)
-            elif msg.getType() == Message.VIDEO_METRIC_RESPONSE:
-                metric_response_handler(msg, db)
-            elif msg.getType() == Message.VIDEO_METRIC_UPDATE:
-                metric_update_handler(msg, db)
-            elif msg.getType() == Message.PING:
-                ping_handler(msg, db)
-        except Exception as e:
-            print(f"[ONODE][CNTRL] Error handling message type {msg.getType()}: {e}")
-            import traceback
-            traceback.print_exc()
+                # marca neighbor vivo em qualquer mensagem de controle
+                db.touch_neighbor(client_address[0])
+
+                try:
+                    if msg.getType() == ANNOUNCE_TYPE:
+                        announce_handler(msg, db)
+                    elif msg.getType() == Message.ADD_NEIGHBOUR:
+                        # simples ack para manter vivo
+                        resp = Message(Message.RESP_NEIGHBOUR, db.get_my_ip(client_address[0]), "")
+                        send_message(resp, client_address[0], ROUTERS_RECEIVER_PORT)
+                    elif msg.getType() == Message.VIDEO_METRIC_REQUEST:
+                        metric_request_handler(msg, db)
+                    elif msg.getType() == Message.VIDEO_METRIC_RESPONSE:
+                        metric_response_handler(msg, db)
+                    elif msg.getType() == Message.VIDEO_METRIC_UPDATE:
+                        metric_update_handler(msg, db)
+                    elif msg.getType() == Message.PING:
+                        ping_handler(msg, db)
+                except Exception as e:
+                    print(f"[ONODE][CNTRL] Error handling message type {msg.getType()}: {e}")
+                    import traceback
+                    traceback.print_exc()
         
-        client_socket.close()
+        except Exception as e:
+            print(f"[ONODE][CNTRL] Socket error: {e}")
+        finally:
+            client_socket.close()
     
 
 def _store_frame(stream_id: str, frame_num: int, frame_data: bytes):
