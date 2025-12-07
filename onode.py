@@ -448,18 +448,33 @@ def cntrl(db:DataBase):
     sckt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sckt.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sckt.bind(('', ROUTERS_RECEIVER_PORT))
-    sckt.listen(5)
+    sckt.listen(10)
 
     while True:
-        client_socket, client_address = sckt.accept()
+        try:
+            client_socket, client_address = sckt.accept()
+            # print(f"[ONODE][CNTRL] Accepted connection from {client_address}")
+            client_socket.settimeout(10.0) # Timeout para evitar travamento
+        except Exception as e:
+            print(f"[ONODE][CNTRL] Accept error: {e}")
+            time.sleep(1)
+            continue
+
         try:
             buffer = b""
             while True:
-                data = client_socket.recv(4096)
+                try:
+                    data = client_socket.recv(4096)
+                except socket.timeout:
+                    print(f"[ONODE][CNTRL] Timeout reading from {client_address}")
+                    break
+                except Exception as e:
+                    # print(f"[ONODE][CNTRL] Recv error from {client_address}: {e}")
+                    break
+
                 if not data:
                     break
                 
-                # print(f"[DEBUG] Recv from {client_address}: {data} (Type: {type(data)})")
                 buffer += data
 
                 # Processa buffer procurando por delimitador \n
@@ -468,14 +483,10 @@ def cntrl(db:DataBase):
                     if not msg_bytes:
                         continue
 
-                    # print(f"[DEBUG] Deserializing: {msg_bytes} (Type: {type(msg_bytes)})")
-
                     try:
                         msg = Message.deserialize(msg_bytes)
                     except Exception as e:
                         print(f"[ONODE][CNTRL] Error deserializing message: {e}")
-                        import traceback
-                        traceback.print_exc()
                         continue
 
                     # marca neighbor vivo em qualquer mensagem de controle
@@ -502,9 +513,13 @@ def cntrl(db:DataBase):
                         traceback.print_exc()
         
         except Exception as e:
-            print(f"[ONODE][CNTRL] Socket error: {e}")
+            print(f"[ONODE][CNTRL] Connection handler error: {e}")
         finally:
-            client_socket.close()
+            try:
+                client_socket.close()
+            except:
+                pass
+            # print(f"[ONODE][CNTRL] Closed connection from {client_address}")
     
 
 def _store_frame(stream_id: str, frame_num: int, frame_data: bytes):
