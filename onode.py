@@ -153,36 +153,80 @@ def metric_request_handler(msg: Message, db: DataBase):
         "src": msg.getSrc()
     })
     
-    # CORRETO: Propaga para vizinhos UPSTREAM (origem das streams)
-    upstream_neighbors = set()
+    # Verifica se a mensagem veio de UPSTREAM (Server -> Node)
+    # Se o remetente for a origem da stream, então é um fluxo de descida (Server push)
+    is_downstream_flow = False
     for stream in streams:
         origin = db.getStreamSource(stream)
-        if origin and origin != msg.getSrc():
-            upstream_neighbors.add(origin)
+        if origin == msg.getSrc():
+            is_downstream_flow = True
+            break
     
-    if upstream_neighbors:
-        # Propaga para nós upstream
-        for neighbor in upstream_neighbors:
-            fwd_msg = Message(Message.VIDEO_METRIC_REQUEST, db.get_my_ip(neighbor))
-            fwd_msg.metrics_encode(
+    if is_downstream_flow:
+        # Fluxo Server -> Node -> Node
+        # Calcula delay acumulado até aqui
+        current_delay = (dt.datetime.now() - start_time).total_seconds() * 1000
+        
+        # Atualiza métricas locais
+        db.AtualizaMetricas(msg.getSrc(), streams, current_delay)
+        log_ev("METRIC_REQ_PROCESS", req=request_id, streams=streams, delay=current_delay, from_=msg.getSrc())
+
+        # Propaga para vizinhos DOWNSTREAM (quem está recebendo a stream)
+        downstream_neighbors = set()
+        with db.lock:
+            for stream in streams:
+                for viz, active_streams in db.active_streams_table.items():
+                    if active_streams.get(stream) == 1 and viz != msg.getSrc():
+                        downstream_neighbors.add(viz)
+        
+        if downstream_neighbors:
+            for downstream in downstream_neighbors:
+                fwd_msg = Message(Message.VIDEO_METRIC_REQUEST, db.get_my_ip(downstream))
+                # Mantém start_time original para medir latência total desde a origem
+                # Passa current_delay como accumulated_delay_ms para informação
+                fwd_msg.metrics_encode(
+                    streams,
+                    request_id=request_id,
+                    start_time=start_time,
+                    accumulated_delay_ms=current_delay
+                )
+                send_message(fwd_msg, downstream, ROUTERS_RECEIVER_PORT)
+                log_ev("METRIC_REQ_FWD_DS", req=request_id, to=downstream, delay=current_delay)
+        else:
+            log_ev("METRIC_REQ_END", req=request_id, msg="No downstream neighbors")
+
+    else:
+        # Fluxo Client -> Node -> Server (Lógica original)
+        # CORRETO: Propaga para vizinhos UPSTREAM (origem das streams)
+        upstream_neighbors = set()
+        for stream in streams:
+            origin = db.getStreamSource(stream)
+            if origin and origin != msg.getSrc():
+                upstream_neighbors.add(origin)
+        
+        if upstream_neighbors:
+            # Propaga para nós upstream
+            for neighbor in upstream_neighbors:
+                fwd_msg = Message(Message.VIDEO_METRIC_REQUEST, db.get_my_ip(neighbor))
+                fwd_msg.metrics_encode(
+                    streams,
+                    request_id=request_id,
+                    start_time=start_time,
+                    accumulated_delay_ms=0
+                )
+                send_message(fwd_msg, neighbor, ROUTERS_RECEIVER_PORT)
+                log_ev("METRIC_REQ_FWD_US", req=request_id, streams=streams, cost=None, parent=None, to=neighbor, from_=db.get_my_ip(neighbor))
+        else:
+            # Nó origem: responde imediatamente
+            response = Message(Message.VIDEO_METRIC_RESPONSE, db.get_my_ip(msg.getSrc()))
+            response.metrics_encode(
                 streams,
                 request_id=request_id,
                 start_time=start_time,
                 accumulated_delay_ms=0
             )
-            send_message(fwd_msg, neighbor, ROUTERS_RECEIVER_PORT)
-            log_ev("METRIC_REQ_FWD", req=request_id, streams=streams, cost=None, parent=None, to=neighbor, from_=db.get_my_ip(neighbor))
-    else:
-        # Nó origem: responde imediatamente
-        response = Message(Message.VIDEO_METRIC_RESPONSE, db.get_my_ip(msg.getSrc()))
-        response.metrics_encode(
-            streams,
-            request_id=request_id,
-            start_time=start_time,
-            accumulated_delay_ms=0
-        )
-        send_message(response, msg.getSrc(), ROUTERS_RECEIVER_PORT)
-        log_ev("METRIC_REQ_ORIGIN", req=request_id, streams=streams, cost=0, parent=None, to=msg.getSrc())
+            send_message(response, msg.getSrc(), ROUTERS_RECEIVER_PORT)
+            log_ev("METRIC_REQ_ORIGIN", req=request_id, streams=streams, cost=0, parent=None, to=msg.getSrc())
 
 def metric_response_handler(msg: Message, db: DataBase):
     try:
