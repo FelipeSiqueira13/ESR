@@ -411,7 +411,7 @@ def sender(db:DataBase):
                     break
 
                 except Exception as e:
-                    log_ev("TX_FAIL", type=msg.getType(), host=host, port=port, attempt=attempt+1, err=e)
+                    # log_ev("TX_FAIL", type=msg.getType(), host=host, port=port, attempt=attempt+1, err=e)
                     # limpa cache se estava guardado
                     if key in connection_cache:
                         try:
@@ -513,6 +513,22 @@ def handle_control_client(client_socket, client_address, db: DataBase):
                         metric_update_handler(msg, db)
                     elif msg.getType() == Message.PING:
                         ping_handler(msg, db)
+                    elif msg.getType() == Message.STREAMS_AVAILABLE:
+                        streams = db.get_streams()
+                        data = ",".join(streams) if streams else "No streams available"
+                        # Responde na mesma conexão TCP
+                        resp = Message(Message.RESP_STREAMS_AVAILABLE, db.get_my_ip(client_address[0]), data)
+                        _send_buffer(client_socket, resp.serialize() + b'\n')
+                    elif msg.getType() == Message.STREAM_REQUEST:
+                        stream_pls_handler(msg, db)
+                        # Ack para o cliente
+                        resp = Message(Message.STREAM_REQUEST, db.get_my_ip(client_address[0]), "OK")
+                        _send_buffer(client_socket, resp.serialize() + b'\n')
+                    elif msg.getType() == Message.STREAM_STOP:
+                        stream_no_handler(msg, db)
+                        # Ack para o cliente
+                        resp = Message(Message.STREAM_STOP, db.get_my_ip(client_address[0]), "OK")
+                        _send_buffer(client_socket, resp.serialize() + b'\n')
                 except Exception as e:
                     print(f"[ONODE][CNTRL] Error handling message type {msg.getType()}: {e}")
                     import traceback

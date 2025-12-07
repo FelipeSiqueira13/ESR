@@ -61,6 +61,10 @@ class DataBase():
         with self.lock:
             self.pending_metric_requests.pop(request_id, None)
 
+    def get_streams(self):
+        with self.lock:
+            return list(self.available_streams)
+
     def get_vizinhos(self):
         """Retorna apenas os endereços"""
         return list(self.vizinhos)
