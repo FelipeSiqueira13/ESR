@@ -168,13 +168,20 @@ def metric_request_handler(msg: Message, db: DataBase):
     })
 
     # Atualiza tabela de roteamento (Best Parent) baseada no custo (delay)
+    should_propagate = False
     for stream in streams:
         # Se não conhecemos a stream, adicionamos (assumindo origem desconhecida ou o próprio sender como gateway)
         if stream not in db.available_streams:
              # Hack: usa o sender como "origem" temporária para saber que existe
              db.addStream(stream, msg.getSrc())
         
-        db.update_announce(stream, total_delay_absolute, msg.getSrc())
+        # Só propagamos se a métrica for útil (melhor caminho ou atualização do pai atual)
+        if db.update_announce(stream, total_delay_absolute, msg.getSrc()):
+            should_propagate = True
+
+    if not should_propagate:
+        log_ev("METRIC_REQ_DROP", req=request_id, msg="Worse path, not propagating")
+        return
 
     # Propaga para TODOS os vizinhos, exceto de quem veio (Flooding controlado)
     neighbors = db.get_vizinhos()

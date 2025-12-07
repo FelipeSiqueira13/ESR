@@ -165,6 +165,13 @@ class DataBase():
     def update_announce(self, stream_id: str, cost: float, parent_ip: str) -> bool:
         with self.lock:
             prev = self.best_cost.get(stream_id, math.inf)
+            curr_parent = self.best_parent.get(stream_id)
+
+            # Se for do mesmo pai, atualiza sempre (para refletir piora ou melhora)
+            if parent_ip == curr_parent:
+                self.best_cost[stream_id] = cost
+                return True
+
             if cost < prev * self.hysteresis_factor:
                 self.best_cost[stream_id] = cost
                 self.best_parent[stream_id] = parent_ip
