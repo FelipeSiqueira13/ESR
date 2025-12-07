@@ -482,9 +482,9 @@ def cntrl(db:DataBase):
                     db.touch_neighbor(client_address[0])
 
                     try:
-                        if msg.getType() == ANNOUNCE_TYPE:
-                            announce_handler(msg, db)
-                        elif msg.getType() == Message.ADD_NEIGHBOUR:
+                        # if msg.getType() == ANNOUNCE_TYPE:
+                        #     announce_handler(msg, db)
+                        if msg.getType() == Message.ADD_NEIGHBOUR:
                             # simples ack para manter vivo
                             resp = Message(Message.RESP_NEIGHBOUR, db.get_my_ip(client_address[0]), "")
                             send_message(resp, client_address[0], ROUTERS_RECEIVER_PORT)
