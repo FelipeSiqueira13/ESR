@@ -454,6 +454,8 @@ def cntrl(db:DataBase):
                 client_socket.close()
                 continue
             
+            print(f"[DEBUG] Recv from {client_address}: {data} (Type: {type(data)})")
+
             # Processa buffer procurando por delimitador \n
             buffer = data
             while b'\n' in buffer:
@@ -461,10 +463,14 @@ def cntrl(db:DataBase):
                 if not msg_bytes:
                     continue
 
+                print(f"[DEBUG] Deserializing: {msg_bytes} (Type: {type(msg_bytes)})")
+
                 try:
                     msg = Message.deserialize(msg_bytes)
                 except Exception as e:
                     print(f"[ONODE][CNTRL] Error deserializing message: {e}")
+                    import traceback
+                    traceback.print_exc()
                     continue
 
                 # marca neighbor vivo em qualquer mensagem de controle
