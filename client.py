@@ -148,7 +148,9 @@ def udp_listener():
                     oldest = min(buf.keys())
                     buf.pop(oldest, None)
 
-            print(f"[CLIENT][UDP][RX] stream={stream_id} frame={frame_num} size={len(frame_b)}B from={addr[0]}")
+            # Reduz verbosidade: imprime apenas a cada 60 frames (aprox 2s)
+            if frame_num % 60 == 0:
+                print(f"[CLIENT][UDP][RX] stream={stream_id} frame={frame_num} size={len(frame_b)}B from={addr[0]}")
         except OSError:
             break
         except Exception as e:
