@@ -75,11 +75,17 @@ def stream_pls_handler(msg: Message, db: DataBase):
 def stream_no_handler(msg: Message, db: DataBase):
     stream_id = msg.data
     ip_viz = msg.getSrc()
-    still_active = db.deactivateStream(ip_viz, stream_id)
+    # Atualiza tabelas
+    db.deactivateStream(ip_viz, stream_id)
     db.set_downstream_active(ip_viz, stream_id, False)
-    print(f"Processed VIDEO_NO for stream {stream_id} from {msg.getSrc()}.\n")
-    if not still_active:
+    
+    # Verifica se ainda há algum vizinho downstream interessado
+    has_downstream = db.has_downstream(stream_id)
+    print(f"Processed VIDEO_NO for stream {stream_id} from {msg.getSrc()}. Has downstream? {has_downstream}\n")
+    
+    if not has_downstream:
         parent = _upstream_for(stream_id, db)
+        print(f"[ONODE][DEBUG] Upstream parent for {stream_id} is {parent}")
         if parent:
             stop = Message(Message.STREAM_STOP, db.get_my_ip(parent), stream_id)
             send_message(stop, parent, RECEIVER_PORT)

@@ -130,12 +130,19 @@ class DataBase():
         with self.lock:
             if stream_id in self.available_streams and viz in self.active_streams_table:
                 self.active_streams_table[viz][stream_id] = 0
+                
+                # Debug: Print state of all neighbors for this stream
+                print(f"[DB][DEACTIVATE] Checking active status for stream {stream_id}:")
+                for v in self.vizinhos:
+                    status = self.active_streams_table[v].get(stream_id, "N/A")
+                    print(f"  - {v}: {status}")
+
                 still_active = any(
-                    self.active_streams_table[v][stream_id] == 1 for v in self.vizinhos
+                    self.active_streams_table[v].get(stream_id, 0) == 1 for v in self.vizinhos
                 )
-                print(f"Stream {stream_id} deactivated for neighbour {viz}.\n")
+                print(f"Stream {stream_id} deactivated for neighbour {viz}. Still active? {still_active}\n")
             else:
-                print(f"ERROR: Stream {stream_id} cannot be deactivated for {viz}.\n")
+                print(f"ERROR: Stream {stream_id} cannot be deactivated for {viz}. (Stream or Viz not found)\n")
                 still_active = False
             # retorna se ainda existe alguém ativo (True => não propaga STOP)
             return still_active

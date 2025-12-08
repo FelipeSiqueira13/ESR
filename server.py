@@ -213,7 +213,7 @@ def sender(sdb:ServerDataBase):
             if time.time() % 2 < 0.05:
                  print(f"[SERVER][DEBUG] Active streams: {list(streams_active.keys())} Targets: {sdb.get_streams_vizinhos()}")
 
-            time.sleep(0.03333)
+            time.sleep(0.03333 * 3)
         except Exception as e:
             print(f"Error in sender: {e}")
     sckt.close()
