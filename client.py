@@ -179,9 +179,8 @@ def udp_listener():
                 print(f"[CLIENT][UDP][DROP] batch decode error: {e}")
                 continue
 
-            # Reduz verbosidade: imprime apenas a cada 60 frames (aprox 2s)
-            if base_frame_num % 60 == 0:
-                print(f"[CLIENT][UDP][RX] stream={stream_id} frame={base_frame_num} batch_size={count} from={addr[0]}")
+            # Imprime sempre que recebe um batch para feedback visual imediato
+            print(f"[CLIENT][UDP][RX] stream={stream_id} frame_base={base_frame_num} batch_size={count} from={addr[0]}")
         except OSError:
             break
         except Exception as e:
