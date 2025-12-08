@@ -1,6 +1,7 @@
 import threading
 import socket
 import sys
+import struct
 import datetime as dt
 import uuid
 from server_database import ServerDataBase
@@ -111,8 +112,8 @@ def sender(sdb:ServerDataBase):
                 if not vs:
                     continue
 
-                frame = vs.nextFrame()
-                if not frame:
+                frames = vs.get_frames(5)
+                if not frames:
                     continue
 
                 # stream_key = "<server>:<stream>"
@@ -120,20 +121,30 @@ def sender(sdb:ServerDataBase):
                 # FIX: Use simple stream_id to match signaling (client requests "stream1", not "S1:stream1")
                 stream_key = stream_id 
                 stream_num = _stream_id_to_int(stream_key)
-                payload = stream_key.encode('utf-8') + b'\0' + frame
+
+                # Pack frames: Count(1B) + [Len(4B) + Frame]*Count
+                packed_frames = struct.pack("!B", len(frames))
+                for f in frames:
+                    packed_frames += struct.pack("!I", len(f)) + f
+
+                payload = stream_key.encode('utf-8') + b'\0' + packed_frames
+                
+                # First frame number in the batch
+                first_frame_num = vs.frameNbr() - len(frames) + 1
+
                 packet_bytes = SimplePacket.encode(
                     stream_id=stream_num,
-                    frame_num=vs.frameNbr(),
+                    frame_num=first_frame_num,
                     timestamp=time.time(),
                     frame_data=payload
                 )
 
                 for vizinho in viz:
                     try:
-                        # print(f"[SERVER][SENDER] stream={stream_key} frame={vs.frameNbr()} -> {vizinho}")
+                        # print(f"[SERVER][SENDER] stream={stream_key} frame={first_frame_num} count={len(frames)} -> {vizinho}")
                         sckt.sendto(packet_bytes, (vizinho, SENDER_PORT))
                     except Exception as e:
-                        print(f"Error sending frame for {stream_key} to {vizinho}: {e}")
+                        print(f"Error sending frame batch for {stream_key} to {vizinho}: {e}")
             
             # Log periódico para debug
             if time.time() % 2 < 0.05:

@@ -41,6 +41,17 @@ class VideoStream:
             self.frameNum += 1
             return data
 
+    def get_frames(self, n=5):
+        """Get next n frames."""
+        frames = []
+        for _ in range(n):
+            data = self.nextFrame()
+            if data:
+                frames.append(data)
+            else:
+                break
+        return frames
+
     def restart_stream(self):
         """Video restarts when it's over"""
         if self.file:

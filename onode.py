@@ -6,6 +6,7 @@ import datetime as dt
 import json, uuid
 import math
 import time
+import struct
 from typing import Optional
 from database import DataBase
 from msg import Message
@@ -759,7 +760,7 @@ def data_listener(db: DataBase):
             if b'\0' not in payload:
                 print(f"[ONODE][MM][DROP] malformed payload from {sender_ip}")
                 continue
-            stream_id_bytes, frame_bytes = payload.split(b'\0', 1)
+            stream_id_bytes, batch_data = payload.split(b'\0', 1)
             try:
                 stream_id = stream_id_bytes.decode('utf-8')  # já pode ser "S1:stream3"
             except Exception:
@@ -772,16 +773,32 @@ def data_listener(db: DataBase):
                 print(f"[ONODE][MM][DROP] unexpected upstream for {stream_id}: got {sender_ip}, expect {upstream}")
                 continue
 
-            print(f"[ONODE][MM][RX] stream={stream_id} frame={frame_num} from={sender_ip} size={len(frame_bytes)}B")
-
-            # Se não há downstream ativo, assume nó folha/cliente e guarda frame
+            # Decode batch for logging/storage
             try:
-                downstream_active = db.has_downstream(stream_id)
-            except Exception:
-                downstream_active = False
+                if len(batch_data) < 1:
+                     raise ValueError("Empty batch")
+                count = struct.unpack("!B", batch_data[:1])[0]
+                print(f"[ONODE][MM][RX] stream={stream_id} frame_base={frame_num} batch_size={count} from={sender_ip}")
+                
+                # Se não há downstream ativo, assume nó folha/cliente e guarda frames
+                try:
+                    downstream_active = db.has_downstream(stream_id)
+                except Exception:
+                    downstream_active = False
 
-            if not downstream_active:
-                _store_frame(stream_id, frame_num, frame_bytes)
+                if not downstream_active:
+                    offset = 1
+                    for i in range(count):
+                        if offset + 4 > len(batch_data): break
+                        f_len = struct.unpack("!I", batch_data[offset:offset+4])[0]
+                        offset += 4
+                        if offset + f_len > len(batch_data): break
+                        frame_b = batch_data[offset:offset+f_len]
+                        offset += f_len
+                        _store_frame(stream_id, frame_num + i, frame_b)
+
+            except Exception as e:
+                print(f"[ONODE][MM][ERR] batch decode: {e}")
 
             forward_mm(raw, stream_id, sender_ip, db)
 

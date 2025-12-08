@@ -1,5 +1,6 @@
 import socket
 import sys, json
+import struct
 from msg import Message
 from database import DataBase
 from onode import send_message
@@ -132,25 +133,55 @@ def udp_listener():
             if b'\0' not in payload:
                 print("[CLIENT][UDP][DROP] malformed payload (no NUL)")
                 continue
-            stream_id_b, frame_b = payload.split(b'\0', 1)
+            stream_id_b, batch_data = payload.split(b'\0', 1)
             try:
                 stream_id = stream_id_b.decode('utf-8')
             except Exception:
                 print("[CLIENT][UDP][DROP] bad stream_id bytes")
                 continue
 
-            frame_num = pkt.get_frame_num()
-            with _frame_lock:
-                buf = _frame_buffer.setdefault(stream_id, {})
-                buf[frame_num] = frame_b
-                # Limita buffer a 200 frames
-                if len(buf) > 200:
-                    oldest = min(buf.keys())
-                    buf.pop(oldest, None)
+            base_frame_num = pkt.get_frame_num()
+            
+            try:
+                # Unpack batch: Count(1B) + [Len(4B) + Frame]*Count
+                if len(batch_data) < 1:
+                     # Fallback for single frame (old format) or empty
+                     # Assuming new format always has count. 
+                     # If we want backward compatibility, we check if it looks like a batch.
+                     # But let's assume we upgraded the protocol.
+                     raise ValueError("Empty batch data")
+
+                count = struct.unpack("!B", batch_data[:1])[0]
+                offset = 1
+                
+                with _frame_lock:
+                    buf = _frame_buffer.setdefault(stream_id, {})
+                    
+                    for i in range(count):
+                        if offset + 4 > len(batch_data):
+                            break
+                        f_len = struct.unpack("!I", batch_data[offset:offset+4])[0]
+                        offset += 4
+                        if offset + f_len > len(batch_data):
+                            break
+                        frame_b = batch_data[offset:offset+f_len]
+                        offset += f_len
+                        
+                        current_frame_num = base_frame_num + i
+                        buf[current_frame_num] = frame_b
+                    
+                    # Limita buffer a 200 frames
+                    if len(buf) > 200:
+                        oldest = min(buf.keys())
+                        buf.pop(oldest, None)
+
+            except Exception as e:
+                print(f"[CLIENT][UDP][DROP] batch decode error: {e}")
+                continue
 
             # Reduz verbosidade: imprime apenas a cada 60 frames (aprox 2s)
-            if frame_num % 60 == 0:
-                print(f"[CLIENT][UDP][RX] stream={stream_id} frame={frame_num} size={len(frame_b)}B from={addr[0]}")
+            if base_frame_num % 60 == 0:
+                print(f"[CLIENT][UDP][RX] stream={stream_id} frame={base_frame_num} batch_size={count} from={addr[0]}")
         except OSError:
             break
         except Exception as e:
