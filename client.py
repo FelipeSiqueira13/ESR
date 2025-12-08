@@ -199,8 +199,11 @@ def send_stream_stop(node_host, node_port, client_name, stream_number):
         if not source:
             return
         msg = Message(Message.STREAM_STOP, source, stream_number)
-        send_tcp_request(node_host, node_port, msg)
-        print(f"[CLIENT] STREAM_STOP sent for {stream_number}")
+        resp = send_tcp_request(node_host, node_port, msg)
+        if resp:
+            print(f"[CLIENT] STREAM_STOP sent for {stream_number}. Response: {resp.getData()}")
+        else:
+            print(f"[CLIENT] STREAM_STOP sent for {stream_number}. No response.")
     except Exception as e:
         print(f"[CLIENT] STREAM_STOP error: {e}")
 
@@ -271,12 +274,18 @@ def main():
         global _running
         _running = False
         
-        # Fecha socket UDP para desbloquear recvfrom
+        # Fecha socket UDP para desbloquear recvfrom IMEDIATAMENTE
         if _udp_sock:
             try:
                 _udp_sock.close()
+                print("UDP socket closed.")
             except:
                 pass
+
+        if current_stream:
+            print(f"Sending stop request for stream: {current_stream}")
+            send_stream_stop(node_host, node_port, clientName, current_stream)
+
 
         # Envia STREAM_STOP se havia uma stream selecionada
         if current_stream:
