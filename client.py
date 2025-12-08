@@ -12,6 +12,7 @@ SENDER_PORT = 40332  # porta de receção UDP de dados (MM)
 _frame_buffer = {}
 _frame_lock = threading.Lock()
 _running = True
+_udp_sock = None
 
 def get_node_info(clientName):
     db = DataBase(clientName)
@@ -115,14 +116,16 @@ def requestStream(node_host, node_port, client_name, stream_number):
 
 def udp_listener():
     """Escuta frames via UDP (SimplePacket) e armazena por frame_num."""
-    udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    udp_sock.bind(('', SENDER_PORT))
+    global _udp_sock
+    _udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    _udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    _udp_sock.bind(('', SENDER_PORT))
     print(f"[CLIENT][UDP] listening on 0.0.0.0:{SENDER_PORT}")
 
     while _running:
         try:
-            raw, addr = udp_sock.recvfrom(65535)
+            raw, addr = _udp_sock.recvfrom(65535)
+            if not _running: break
             try:
                 pkt = SimplePacket.decode(raw)
             except Exception as e:
@@ -180,12 +183,15 @@ def udp_listener():
                 continue
 
             # Imprime sempre que recebe um batch para feedback visual imediato
-            print(f"[CLIENT][UDP][RX] stream={stream_id} frame_base={base_frame_num} batch_size={count} from={addr[0]}")
+            if _running:
+                print(f"[CLIENT][UDP][RX] stream={stream_id} frame_base={base_frame_num} batch_size={count} from={addr[0]}")
         except OSError:
             break
         except Exception as e:
             print(f"[CLIENT][UDP][ERR] {e}")
-    udp_sock.close()
+    
+    if _udp_sock:
+        _udp_sock.close()
 
 def send_stream_stop(node_host, node_port, client_name, stream_number):
     try:
@@ -264,10 +270,18 @@ def main():
     finally:
         global _running
         _running = False
+        
+        # Fecha socket UDP para desbloquear recvfrom
+        if _udp_sock:
+            try:
+                _udp_sock.close()
+            except:
+                pass
+
         # Envia STREAM_STOP se havia uma stream selecionada
         if current_stream:
             send_stream_stop(node_host, node_port, clientName, current_stream)
-        # dá tempo para fechar o UDP
+        
         time.sleep(0.5)
 
 if __name__ == '__main__':
