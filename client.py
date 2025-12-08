@@ -235,21 +235,32 @@ def main():
 
     current_stream = None
     try:
-        while True:
+        # Loop de seleção
+        while current_stream is None:
             stream_choice = input("Select a stream by name (or 'quit' to exit, 'ping <stream>' to ping): ")
             if stream_choice.lower() == 'quit':
-                break
+                return
             if stream_choice.lower().startswith("ping "):
                 sid = stream_choice.split(None, 1)[1].strip()
                 print(send_ping(node_host, node_port, clientName, sid))
                 continue
+            
             print(f"Requesting stream: {stream_choice}")
             response = requestStream(node_host, node_port, clientName, stream_choice)
             print("Response from node:", response)
             if response == "OK":
                 current_stream = stream_choice
+                print(f"\nStream {current_stream} started.")
+                print("==================================================")
+                print("       PRESS CTRL+C TO STOP STREAM AND EXIT       ")
+                print("==================================================")
+
+        # Loop de streaming (mantém main thread viva enquanto UDP thread imprime)
+        while True:
+            time.sleep(1)
+
     except KeyboardInterrupt:
-        pass
+        print("\nStopping stream...")
     finally:
         global _running
         _running = False
