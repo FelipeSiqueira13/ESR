@@ -1,12 +1,19 @@
 import io
 import json
+import os
 import socket
 import struct
 import sys
 import threading
-import tkinter as tk
-from tkinter import ttk, messagebox
 from typing import Callable, List, Optional
+
+try:
+    import tkinter as tk
+    from tkinter import ttk, messagebox
+except ImportError:
+    tk = None
+    ttk = None
+    messagebox = None
 
 try:
     from PIL import Image, ImageTk
@@ -25,6 +32,16 @@ except ImportError:
 
 SENDER_PORT = getattr(client_core, "SENDER_PORT", 40332)
 RECEIVER_PORT = 40331
+
+
+def _tk_gui_available() -> bool:
+    if tk is None:
+        return False
+    platform = sys.platform
+    if platform.startswith("win") or platform == "darwin":
+        return True
+    env_vars = ("DISPLAY", "WAYLAND_DISPLAY", "MIR_SOCKET", "XAUTHORITY")
+    return any(os.environ.get(var) for var in env_vars)
 
 
 def _send_buffer(sock: socket.socket, payload: bytes) -> None:
@@ -146,14 +163,15 @@ class FrameBuffer:
 
 
 class UDPReceiver(threading.Thread):
-    def __init__(self, frame_buffer: FrameBuffer, bits_sink: Callable[[str], None],
-                 current_stream: Callable[[], Optional[str]]):
+    def __init__(self, frame_buffer: Optional[FrameBuffer], bits_sink: Callable[[str], None],
+                 current_stream: Callable[[], Optional[str]], store_frames: bool = True):
         super().__init__(daemon=True)
         self._buffer = frame_buffer
         self._bits_sink = bits_sink
         self._current_stream = current_stream
         self._stop_event = threading.Event()
         self._sock: Optional[socket.socket] = None
+        self._store_frames = store_frames
 
     def stop(self):
         self._stop_event.set()
@@ -211,8 +229,70 @@ class UDPReceiver(threading.Thread):
             except Exception as exc:
                 print(f"[GUI][UDP][DROP] batch decode: {exc}")
                 continue
-            if frames:
+            if frames and self._store_frames and self._buffer is not None:
                 self._buffer.add_frames(pkt.get_frame_num(), frames)
+
+
+def run_headless_cli(client_name: str) -> None:
+    print("[CLIENT][GUI] Tk indisponível; executando modo texto.")
+    node_host, node_port = get_node_info(client_name)
+    if not node_host:
+        print(f"[CLIENT][GUI] Sem node configurado para {client_name}.")
+        return
+
+    current_stream = {"value": None}
+    receiver = UDPReceiver(
+        frame_buffer=None,
+        bits_sink=lambda line: print(f"[BITS] {line}"),
+        current_stream=lambda: current_stream["value"],
+        store_frames=False,
+    )
+    receiver.start()
+
+    try:
+        while True:
+            streams = get_available_streams(node_host, node_port, client_name)
+            if not streams:
+                print("[CLIENT][GUI] Nenhuma stream disponível no momento.")
+                break
+            print("\nStreams disponíveis:")
+            for sid in streams:
+                print(f" - {sid}")
+            choice = input("Selecione uma stream (ou 'quit' para sair): ").strip()
+            if not choice:
+                continue
+            if choice.lower() in {"quit", "exit"}:
+                break
+            if choice not in streams:
+                print("Stream inválida.")
+                continue
+
+            resp = request_stream(node_host, node_port, client_name, choice)
+            if resp != "OK":
+                print(f"Falha ao iniciar stream: {resp}")
+                continue
+
+            current_stream["value"] = choice
+            print(f"Streaming {choice}. Digite 'stop' para parar ou 'quit' para sair.")
+            while current_stream["value"]:
+                try:
+                    cmd = input("cmd> ").strip().lower()
+                except KeyboardInterrupt:
+                    cmd = "stop"
+                if cmd in {"stop", "quit", "exit"}:
+                    send_stream_stop(node_host, node_port, client_name, current_stream["value"])
+                    print("Stream parada.")
+                    current_stream["value"] = None
+                    if cmd in {"quit", "exit"}:
+                        return
+                else:
+                    print("Comandos válidos: stop, quit")
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if current_stream["value"]:
+            send_stream_stop(node_host, node_port, client_name, current_stream["value"])
+        receiver.stop()
 
 
 class ClientGUI:
@@ -348,13 +428,19 @@ def main():
         print("Usage: python client_gui.py <clientName>")
         sys.exit(1)
     client_name = sys.argv[1]
-    root = tk.Tk()
-    try:
-        ClientGUI(root, client_name)
-        root.mainloop()
-    except Exception as exc:
-        messagebox.showerror("Erro", str(exc))
-        root.destroy()
+    if _tk_gui_available():
+        root = tk.Tk()
+        try:
+            ClientGUI(root, client_name)
+            root.mainloop()
+        except Exception as exc:
+            if messagebox:
+                messagebox.showerror("Erro", str(exc))
+            else:
+                print(f"Erro: {exc}")
+            root.destroy()
+    else:
+        run_headless_cli(client_name)
 
 
 if __name__ == "__main__":
