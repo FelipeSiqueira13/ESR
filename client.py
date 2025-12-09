@@ -3,6 +3,9 @@ import sys, json
 import struct
 import threading
 import time
+import os
+import http.server
+import socketserver
 
 try:
     import cv2
@@ -17,6 +20,9 @@ from onode import send_message
 from SimplePacket import SimplePacket
 
 SENDER_PORT = 40332  # porta de receção UDP de dados (MM)
+MJPEG_HTTP_PORT = 8040
+
+_GUI_AVAILABLE = cv2 is not None and np is not None and bool(os.environ.get("DISPLAY"))
 
 _frame_buffer = {}
 _frame_lock = threading.Lock()
@@ -25,6 +31,9 @@ _udp_sock = None
 _playback_thread = None
 _playback_stop = threading.Event()
 _display_warned = False
+_latest_frame = {}
+_http_server = None
+_http_thread = None
 
 def get_node_info(clientName):
     db = DataBase(clientName)
@@ -207,10 +216,10 @@ def udp_listener():
 
 def _display_frame(frame_data, window_title):
     global _display_warned
-    if cv2 is None or np is None:
+    if not _GUI_AVAILABLE:
         if not _display_warned:
             _display_warned = True
-            print("[CLIENT][VIDEO] Visualization requires numpy + opencv-python. Install them to see the stream.")
+            print("[CLIENT][VIDEO] GUI indisponível (sem DISPLAY ou dependências). Usando servidor MJPEG em modo headless.")
         return False
 
     frame_array = np.frombuffer(frame_data, dtype=np.uint8)
@@ -220,6 +229,67 @@ def _display_frame(frame_data, window_title):
     cv2.imshow(window_title, img)
     cv2.waitKey(1)
     return True
+
+def _update_http_frame(stream_id, frame_data):
+    _latest_frame[stream_id] = frame_data
+
+class _MJPEGHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        parts = self.path.strip('/').split('/', 1)
+        if len(parts) != 2 or parts[0] != 'stream' or not parts[1]:
+            self.send_error(404, "Use /stream/<stream_id>")
+            return
+        stream_id = parts[1]
+        self.send_response(200)
+        self.send_header('Content-type', 'multipart/x-mixed-replace; boundary=frame')
+        self.end_headers()
+        last_sent = None
+        try:
+            while _running:
+                frame = _latest_frame.get(stream_id)
+                if frame and frame is not last_sent:
+                    self.wfile.write(b"--frame\r\n")
+                    self.wfile.write(b"Content-Type: image/jpeg\r\n")
+                    self.wfile.write(f"Content-Length: {len(frame)}\r\n\r\n".encode('ascii'))
+                    self.wfile.write(frame)
+                    self.wfile.write(b"\r\n")
+                    last_sent = frame
+                else:
+                    time.sleep(0.05)
+        except (ConnectionResetError, BrokenPipeError):
+            pass
+
+    def log_message(self, format, *args):
+        return
+
+class _ThreadedHTTPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+    allow_reuse_address = True
+
+def _ensure_http_server():
+    global _http_server, _http_thread
+    if _http_server or _GUI_AVAILABLE:
+        return
+    try:
+        _http_server = _ThreadedHTTPServer(('', MJPEG_HTTP_PORT), _MJPEGHandler)
+    except OSError as e:
+        print(f"[CLIENT][VIDEO] Falha ao iniciar servidor MJPEG: {e}")
+        return
+    _http_thread = threading.Thread(target=_http_server.serve_forever, daemon=True)
+    _http_thread.start()
+    print(f"[CLIENT][VIDEO] Abra http://localhost:{MJPEG_HTTP_PORT}/stream/<stream_id> para visualizar.")
+
+def _stop_http_server():
+    global _http_server, _http_thread
+    if _http_server:
+        try:
+            _http_server.shutdown()
+            _http_server.server_close()
+        except Exception:
+            pass
+    if _http_thread and _http_thread.is_alive():
+        _http_thread.join(timeout=1.0)
+    _http_server = None
+    _http_thread = None
 
 def _playback_loop(stream_id):
     window_title = f"Stream - {stream_id}"
@@ -245,7 +315,8 @@ def _playback_loop(stream_id):
             continue
         shown = _display_frame(frame, window_title)
         if not shown:
-            time.sleep(0.05)
+            _update_http_frame(stream_id, frame)
+            time.sleep(0.02)
             continue
 
     if cv2 is not None:
@@ -257,6 +328,8 @@ def _playback_loop(stream_id):
 def _start_playback(stream_id):
     global _playback_thread
     _playback_stop.clear()
+    if not _GUI_AVAILABLE:
+        _ensure_http_server()
     _playback_thread = threading.Thread(target=_playback_loop, args=(stream_id,), daemon=True)
     _playback_thread.start()
 
@@ -271,6 +344,8 @@ def _stop_playback():
             cv2.destroyAllWindows()
         except Exception:
             pass
+    if not _GUI_AVAILABLE:
+        _stop_http_server()
 
 def send_stream_stop(node_host, node_port, client_name, stream_number):
     try:
