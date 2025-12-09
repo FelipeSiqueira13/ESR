@@ -181,6 +181,7 @@ def udp_listener():
 
             base_frame_num = pkt.get_frame_num()
             
+            printed_bits = []
             try:
                 # Unpack batch: Count(1B) + [Len(4B) + Frame]*Count
                 if len(batch_data) < 1:
@@ -208,6 +209,10 @@ def udp_listener():
                         
                         current_frame_num = base_frame_num + i
                         buf[current_frame_num] = frame_b
+
+                        # preview limited bits for console visualization
+                        bit_preview = " ".join(f"{byte:08b}" for byte in frame_b[:8])
+                        printed_bits.append((current_frame_num, bit_preview))
                     
                     # Limita buffer a 200 frames
                     if len(buf) > 200:
@@ -218,9 +223,10 @@ def udp_listener():
                 print(f"[CLIENT][UDP][DROP] batch decode error: {e}")
                 continue
 
-            # Imprime sempre que recebe um batch para feedback visual imediato
-            if _running:
-                print(f"[CLIENT][UDP][RX] stream={stream_id} frame_base={base_frame_num} batch_size={count} from={addr[0]}")
+            # Exibe bits dos frames recebidos em vez das mensagens de debug
+            if _running and printed_bits:
+                for frame_num, bits in printed_bits:
+                    print(f"[CLIENT][BITS] stream={stream_id} frame={frame_num} bits={bits}...")
         except OSError:
             break
         except Exception as e:
@@ -291,7 +297,7 @@ def _ensure_http_server():
         return
     _http_thread = threading.Thread(target=_http_server.serve_forever, daemon=True)
     _http_thread.start()
-    print(f"[CLIENT][VIDEO] Servidor MJPEG headless ativo em http://localhost:{MJPEG_HTTP_PORT}/stream/<stream_id>.")
+    print("[CLIENT][VIDEO] Servidor MJPEG headless ativo apenas para integrações automáticas.")
 
 def _stop_http_server():
     global _http_server, _http_thread
