@@ -22,7 +22,22 @@ from SimplePacket import SimplePacket
 SENDER_PORT = 40332  # porta de receção UDP de dados (MM)
 MJPEG_HTTP_PORT = 8040
 
-_GUI_AVAILABLE = cv2 is not None and np is not None and bool(os.environ.get("DISPLAY"))
+def _detect_gui_support():
+    """Determina se é possível abrir uma janela local para o vídeo."""
+    if cv2 is None or np is None:
+        return False
+
+    platform = sys.platform
+    if platform.startswith("win"):
+        return True  # Windows não depende de DISPLAY
+    if platform == "darwin":
+        return True  # macOS dispõe de janela própria
+
+    display_vars = ("DISPLAY", "WAYLAND_DISPLAY", "MIR_SOCKET", "XAUTHORITY")
+    return any(os.environ.get(var) for var in display_vars)
+
+
+_GUI_AVAILABLE = _detect_gui_support()
 
 _frame_buffer = {}
 _frame_lock = threading.Lock()
@@ -219,7 +234,7 @@ def _display_frame(frame_data, window_title):
     if not _GUI_AVAILABLE:
         if not _display_warned:
             _display_warned = True
-            print("[CLIENT][VIDEO] GUI indisponível (sem DISPLAY ou dependências). Usando servidor MJPEG em modo headless.")
+            print("[CLIENT][VIDEO] GUI indisponível; exibindo apenas fallback headless.")
         return False
 
     frame_array = np.frombuffer(frame_data, dtype=np.uint8)
@@ -276,7 +291,7 @@ def _ensure_http_server():
         return
     _http_thread = threading.Thread(target=_http_server.serve_forever, daemon=True)
     _http_thread.start()
-    print(f"[CLIENT][VIDEO] Abra http://localhost:{MJPEG_HTTP_PORT}/stream/<stream_id> para visualizar.")
+    print(f"[CLIENT][VIDEO] Servidor MJPEG headless ativo em http://localhost:{MJPEG_HTTP_PORT}/stream/<stream_id>.")
 
 def _stop_http_server():
     global _http_server, _http_thread
