@@ -1,10 +1,19 @@
 import socket
 import sys, json
 import struct
+import threading
+import time
+
+try:
+    import cv2
+    import numpy as np
+except ImportError:
+    cv2 = None
+    np = None
+
 from msg import Message
 from database import DataBase
 from onode import send_message
-import threading, time
 from SimplePacket import SimplePacket
 
 SENDER_PORT = 40332  # porta de receção UDP de dados (MM)
@@ -13,6 +22,9 @@ _frame_buffer = {}
 _frame_lock = threading.Lock()
 _running = True
 _udp_sock = None
+_playback_thread = None
+_playback_stop = threading.Event()
+_display_warned = False
 
 def get_node_info(clientName):
     db = DataBase(clientName)
@@ -193,6 +205,73 @@ def udp_listener():
     if _udp_sock:
         _udp_sock.close()
 
+def _display_frame(frame_data, window_title):
+    global _display_warned
+    if cv2 is None or np is None:
+        if not _display_warned:
+            _display_warned = True
+            print("[CLIENT][VIDEO] Visualization requires numpy + opencv-python. Install them to see the stream.")
+        return False
+
+    frame_array = np.frombuffer(frame_data, dtype=np.uint8)
+    img = cv2.imdecode(frame_array, cv2.IMREAD_COLOR)
+    if img is None:
+        return False
+    cv2.imshow(window_title, img)
+    cv2.waitKey(1)
+    return True
+
+def _playback_loop(stream_id):
+    window_title = f"Stream - {stream_id}"
+    expected = None
+    while _running and not _playback_stop.is_set():
+        frame = None
+        with _frame_lock:
+            buf = _frame_buffer.get(stream_id)
+            if buf:
+                if expected is None:
+                    expected = min(buf.keys())
+                if expected in buf:
+                    frame = buf.pop(expected)
+                    expected += 1
+                else:
+                    higher = [n for n in buf.keys() if n > (expected or 0)]
+                    if higher:
+                        next_num = min(higher)
+                        frame = buf.pop(next_num)
+                        expected = next_num + 1
+        if frame is None:
+            time.sleep(0.01)
+            continue
+        shown = _display_frame(frame, window_title)
+        if not shown:
+            time.sleep(0.05)
+            continue
+
+    if cv2 is not None:
+        try:
+            cv2.destroyWindow(window_title)
+        except Exception:
+            pass
+
+def _start_playback(stream_id):
+    global _playback_thread
+    _playback_stop.clear()
+    _playback_thread = threading.Thread(target=_playback_loop, args=(stream_id,), daemon=True)
+    _playback_thread.start()
+
+def _stop_playback():
+    global _playback_thread
+    _playback_stop.set()
+    if _playback_thread and _playback_thread.is_alive():
+        _playback_thread.join(timeout=1.0)
+    _playback_thread = None
+    if cv2 is not None:
+        try:
+            cv2.destroyAllWindows()
+        except Exception:
+            pass
+
 def send_stream_stop(node_host, node_port, client_name, stream_number):
     try:
         source = get_client_ip(client_name)
@@ -259,6 +338,7 @@ def main():
             print("Response from node:", response)
             if response == "OK":
                 current_stream = stream_choice
+                _start_playback(current_stream)
                 print(f"\nStream {current_stream} started.")
                 print("==================================================")
                 print("       PRESS CTRL+C TO STOP STREAM AND EXIT       ")
@@ -274,6 +354,8 @@ def main():
         global _running
         _running = False
         
+        _stop_playback()
+
         # Fecha socket UDP para desbloquear recvfrom IMEDIATAMENTE
         if _udp_sock:
             try:
