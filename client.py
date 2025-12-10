@@ -6,6 +6,8 @@ import time
 import os
 import http.server
 import socketserver
+import subprocess
+import shutil
 
 try:
     import cv2
@@ -49,6 +51,44 @@ _display_warned = False
 _latest_frame = {}
 _http_server = None
 _http_thread = None
+_ffplay_process = None
+
+def _detect_ffplay():
+    return shutil.which("ffplay") is not None
+
+def _start_ffplay(window_title):
+    global _ffplay_process
+    if not _detect_ffplay():
+        print("ffplay not found.")
+        return False
+    
+    try:
+        # -f mjpeg: force format
+        # -i -: read from stdin
+        # -an: disable audio
+        # -sn: disable subtitles
+        # -window_title: set title
+        # -fflags nobuffer: reduce latency
+        # -flags low_delay: reduce latency
+        cmd = ["ffplay", "-f", "mjpeg", "-i", "-", "-an", "-sn", "-window_title", window_title, "-framedrop", "-fflags", "nobuffer", "-flags", "low_delay", "-loglevel", "quiet"]
+        _ffplay_process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        print(f"[CLIENT] ffplay started for {window_title}")
+        return True
+    except Exception as e:
+        print(f"Error starting ffplay: {e}")
+        return False
+
+def _stop_ffplay():
+    global _ffplay_process
+    if _ffplay_process:
+        try:
+            if _ffplay_process.stdin:
+                _ffplay_process.stdin.close()
+            _ffplay_process.terminate()
+            _ffplay_process.wait(timeout=1)
+        except Exception:
+            pass
+        _ffplay_process = None
 
 def get_node_info(clientName):
     db = DataBase(clientName)
@@ -236,7 +276,20 @@ def udp_listener(bind_ip):
         _udp_sock.close()
 
 def _display_frame(frame_data, window_title):
-    global _display_warned
+    global _display_warned, _ffplay_process
+    
+    # 1. Tenta usar ffplay se estiver ativo
+    if _ffplay_process:
+        try:
+            _ffplay_process.stdin.write(frame_data)
+            _ffplay_process.stdin.flush()
+            return True
+        except (BrokenPipeError, OSError):
+            print("[CLIENT] ffplay closed/crashed.")
+            _stop_ffplay()
+            # Fallback to CV2 if available
+    
+    # 2. Fallback para OpenCV
     if not _GUI_AVAILABLE:
         if not _display_warned:
             _display_warned = True
@@ -314,6 +367,11 @@ def _stop_http_server():
 
 def _playback_loop(stream_id):
     window_title = f"Stream - {stream_id}"
+    
+    # Tenta iniciar ffplay
+    if _detect_ffplay():
+        _start_ffplay(window_title)
+    
     expected = None
     while _running and not _playback_stop.is_set():
         frame = None
@@ -340,6 +398,7 @@ def _playback_loop(stream_id):
             time.sleep(0.02)
             continue
 
+    _stop_ffplay()
     if cv2 is not None:
         try:
             cv2.destroyWindow(window_title)
