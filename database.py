@@ -16,7 +16,7 @@ class DataBase():
         # agora os valores podem ser listas; normaliza para dict ip -> [viz1, viz2, ...]
         raw = ip_config.get(name, {})
         self.ip_to_viz = {ip: (v if isinstance(v, list) else [v]) for ip, v in raw.items()}
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.neighbor_last_seen = {}  # vizinho -> datetime
         self.best_parent = {}         # stream_id -> ip vizinho
         self.best_cost = {}           # stream_id -> métrica
