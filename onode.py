@@ -346,7 +346,7 @@ def listener(db:DataBase):
     print("Listener thread started")
     sckt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sckt.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sckt.bind(('', RECEIVER_PORT))
+    sckt.bind((db.my_ip, RECEIVER_PORT))
     sckt.listen(10) #Aceita até 10 conexões em espera
 
     while True:
@@ -580,7 +580,7 @@ def cntrl(db:DataBase):
     print("Control thread started")
     sckt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sckt.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sckt.bind(('', ROUTERS_RECEIVER_PORT))
+    sckt.bind((db.my_ip, ROUTERS_RECEIVER_PORT))
     sckt.listen(10)
 
     while True:
@@ -746,7 +746,7 @@ def data_listener(db: DataBase):
     print("Data listener thread started (UDP)")
     udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    udp_sock.bind(('', SENDER_PORT))
+    udp_sock.bind((db.my_ip, SENDER_PORT))
 
     while True:
         try:

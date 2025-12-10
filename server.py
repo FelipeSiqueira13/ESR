@@ -45,7 +45,7 @@ def listener(sdb:ServerDataBase):
     print("Listener thread started")
     sckt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sckt.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sckt.bind(('', RECEIVER_PORT))
+    sckt.bind((sdb.my_ip, RECEIVER_PORT))
     sckt.listen(10)
 
     while True:
@@ -222,7 +222,7 @@ def cntrl(sdb:ServerDataBase):
     print("Control thread started")
     sckt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sckt.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sckt.bind(('', ROUTERS_RECEIVER_PORT))
+    sckt.bind((sdb.my_ip, ROUTERS_RECEIVER_PORT))
     sckt.listen(10)
 
     while True:

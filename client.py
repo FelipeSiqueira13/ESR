@@ -150,13 +150,13 @@ def requestStream(node_host, node_port, client_name, stream_number):
         print("Error requesting stream:", e)
         return "Request failed."
 
-def udp_listener():
+def udp_listener(bind_ip):
     """Escuta frames via UDP (SimplePacket) e armazena por frame_num."""
     global _udp_sock
     _udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     _udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    _udp_sock.bind(('', SENDER_PORT))
-    print(f"[CLIENT][UDP] listening on 0.0.0.0:{SENDER_PORT}")
+    _udp_sock.bind((bind_ip, SENDER_PORT))
+    print(f"[CLIENT][UDP] listening on {bind_ip}:{SENDER_PORT}")
 
     while _running:
         try:
@@ -404,8 +404,13 @@ def main():
         print(f"No node information found for client {clientName}")
         sys.exit(1)
 
+    my_ip = get_client_ip(clientName)
+    if not my_ip:
+        print(f"Could not determine IP for client {clientName}")
+        sys.exit(1)
+
     # Inicia listener UDP de frames
-    t_udp = threading.Thread(target=udp_listener, daemon=True)
+    t_udp = threading.Thread(target=udp_listener, args=(my_ip,), daemon=True)
     t_udp.start()
 
     streams = get_available_streams(node_host, node_port, clientName)
