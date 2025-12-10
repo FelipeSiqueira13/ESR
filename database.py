@@ -16,6 +16,16 @@ class DataBase():
         # agora os valores podem ser listas; normaliza para dict ip -> [viz1, viz2, ...]
         raw = ip_config.get(name, {})
         self.ip_to_viz = {ip: (v if isinstance(v, list) else [v]) for ip, v in raw.items()}
+        
+        # Define my_ip para binding
+        my_ips = list(raw.keys())
+        if len(my_ips) == 1:
+            self.my_ip = my_ips[0]
+        else:
+            # Se tiver multiplas interfaces (Router) ou nenhuma, bind em todas (0.0.0.0)
+            # Isso garante funcionamento no CORE para routers e evita erros de logica
+            self.my_ip = "0.0.0.0"
+
         self.lock = threading.RLock()
         self.neighbor_last_seen = {}  # vizinho -> datetime
         self.best_parent = {}         # stream_id -> ip vizinho
