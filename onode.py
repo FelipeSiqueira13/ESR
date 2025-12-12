@@ -181,9 +181,26 @@ def metric_request_handler(msg: Message, db: DataBase):
              # Hack: usa o sender como "origem" temporária para saber que existe
              db.addStream(stream, msg.getSrc())
         
+        current_upstream = _upstream_for(stream, db)
+
         # Só propagamos se a métrica for útil (melhor caminho ou atualização do pai atual)
         if db.update_announce(stream, total_delay_absolute, msg.getSrc()):
             should_propagate = True
+
+            new_upstream = _upstream_for(stream, db)
+            
+            # Se o upstream mudou e temos clientes ativos, fazemos o switch
+            if current_upstream and new_upstream and current_upstream != new_upstream:
+                if db.has_downstream(stream):
+                    log_ev("ROUTE_SWITCH", stream=stream, old=current_upstream, new=new_upstream)
+                    
+                    # 1. Request from new parent
+                    req = Message(Message.STREAM_REQUEST, db.get_my_ip(new_upstream), stream)
+                    send_message(req, new_upstream, RECEIVER_PORT)
+                    
+                    # 2. Stop from old parent
+                    stop = Message(Message.STREAM_STOP, db.get_my_ip(current_upstream), stream)
+                    send_message(stop, current_upstream, RECEIVER_PORT)
 
     if not should_propagate:
         log_ev("METRIC_REQ_DROP", req=request_id, msg="Worse path, not propagating")
