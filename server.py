@@ -19,6 +19,7 @@ ROUTERS_SENDER_PORT = 40334
 METRIC_INTERVAL_SECONDS = 5
 HEARTBEAT_INTERVAL = 1
 HEARTBEAT_TIMEOUT = 15
+FPS = 20
 
 def _send_buffer(sock: socket.socket, payload: bytes):
     view = memoryview(payload)
@@ -145,7 +146,7 @@ def sender(sdb:ServerDataBase):
                             print(f"Error sending frame {vs.frameNbr()} for {stream_key} to {vizinho}: {e}")
             
             elapsed = time.time() - loop_start
-            time.sleep(max(0, 0.034 - elapsed))
+            time.sleep(max(0, (1/FPS) - elapsed))
         except Exception as e:
             print(f"Error in sender: {e}")
     sckt.close()
