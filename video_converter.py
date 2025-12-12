@@ -20,7 +20,7 @@ def convert_to_custom_mjpeg(input_video_path, output_mjpeg_path):
                 break
             
             # Redimensionar se necessário (opcional, para deixar mais leve)
-            # frame = cv2.resize(frame, (480, 360))
+            frame = cv2.resize(frame, (480, 360))
 
             # Codifica o frame atual para formato JPEG
             # O segundo parâmetro [int(cv2.IMWRITE_JPEG_QUALITY), 50] define a qualidade (0-100)
