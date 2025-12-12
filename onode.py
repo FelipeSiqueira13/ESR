@@ -28,8 +28,8 @@ _frame_lock = threading.Lock()
 TTL_DEFAULT = 8
 ANNOUNCE_TYPE = Message.VIDEO_METRIC_REQUEST  # reutilizamos como ANNOUNCE
 
-HEARTBEAT_INTERVAL = 5      # segundos
-HEARTBEAT_TIMEOUT  = 30     # segundos
+HEARTBEAT_INTERVAL = 1      # segundos
+HEARTBEAT_TIMEOUT  = 3      # segundos (reduzido para detecção mais rápida de falhas)
 HYST_FACTOR = 0.9           # mesma ideia do DB; opcional sobrescrever
 
 
@@ -826,6 +826,9 @@ def data_listener(db: DataBase):
             # Atualiza timestamp de recebimento para o Watchdog
             with _stream_last_seen_lock:
                 _stream_last_seen[stream_id] = time.time()
+
+            # Marca vizinho como vivo (se está mandando dados, está vivo)
+            db.touch_neighbor(sender_ip)
 
             # Valida origem esperada (best_parent)
             upstream = db.get_best_parent(stream_id) or db.getStreamSource(stream_id)
