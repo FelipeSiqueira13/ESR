@@ -56,6 +56,20 @@ def _upstream_for(stream_id: str, db: DataBase):
         return parent
     return db.getStreamSource(stream_id)
 
+def _check_and_switch_parent(stream, current_upstream, db):
+    new_upstream = _upstream_for(stream, db)
+    if current_upstream and new_upstream and current_upstream != new_upstream:
+        if db.has_downstream(stream):
+            log_ev("ROUTE_SWITCH", stream=stream, old=current_upstream, new=new_upstream)
+            
+            # 1. Request from new parent
+            req = Message(Message.STREAM_REQUEST, db.get_my_ip(new_upstream), stream)
+            send_message(req, new_upstream, RECEIVER_PORT)
+            
+            # 2. Stop from old parent
+            stop = Message(Message.STREAM_STOP, db.get_my_ip(current_upstream), stream)
+            send_message(stop, current_upstream, RECEIVER_PORT)
+
 def stream_pls_handler(msg: Message, db: DataBase):
     stream_id = msg.data
     ip_viz = msg.getSrc()
@@ -186,21 +200,7 @@ def metric_request_handler(msg: Message, db: DataBase):
         # Só propagamos se a métrica for útil (melhor caminho ou atualização do pai atual)
         if db.update_announce(stream, total_delay_absolute, msg.getSrc()):
             should_propagate = True
-
-            new_upstream = _upstream_for(stream, db)
-            
-            # Se o upstream mudou e temos clientes ativos, fazemos o switch
-            if current_upstream and new_upstream and current_upstream != new_upstream:
-                if db.has_downstream(stream):
-                    log_ev("ROUTE_SWITCH", stream=stream, old=current_upstream, new=new_upstream)
-                    
-                    # 1. Request from new parent
-                    req = Message(Message.STREAM_REQUEST, db.get_my_ip(new_upstream), stream)
-                    send_message(req, new_upstream, RECEIVER_PORT)
-                    
-                    # 2. Stop from old parent
-                    stop = Message(Message.STREAM_STOP, db.get_my_ip(current_upstream), stream)
-                    send_message(stop, current_upstream, RECEIVER_PORT)
+            _check_and_switch_parent(stream, current_upstream, db)
 
     if not should_propagate:
         log_ev("METRIC_REQ_DROP", req=request_id, msg="Worse path, not propagating")
@@ -257,7 +257,9 @@ def metric_response_handler(msg: Message, db: DataBase):
     # Atualiza métricas e possivelmente best_parent para cada stream
     db.AtualizaMetricas(msg.getSrc(), streams, total_delay_ms)
     for stream in streams:
-        db.update_announce(stream, total_delay_ms, msg.getSrc())
+        current_upstream = _upstream_for(stream, db)
+        if db.update_announce(stream, total_delay_ms, msg.getSrc()):
+            _check_and_switch_parent(stream, current_upstream, db)
 
     stored = db.get_metric_request(request_id)
     
@@ -312,6 +314,12 @@ def metric_update_handler(msg: Message, db: DataBase):
     db.AtualizaMetricas(msg.getSrc(), streams, accumulated_delay)
     log_ev("METRIC_UPDATE_RECV", req=request_id, streams=streams, cost=accumulated_delay, parent=msg.getSrc(), delay_ms=accumulated_delay, from_=msg.getSrc())
     
+    # Atualiza tabela de roteamento e verifica switch
+    for stream in streams:
+        current_upstream = _upstream_for(stream, db)
+        if db.update_announce(stream, accumulated_delay, msg.getSrc()):
+            _check_and_switch_parent(stream, current_upstream, db)
+
     # Propaga o UPDATE para vizinhos downstream (que não são a origem)
     stored = db.get_metric_request(request_id) if request_id else None
     
