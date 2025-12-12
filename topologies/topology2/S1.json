@@ -5,7 +5,6 @@
         ],
         "streams": {
             "stream1": "videos/movie.Mjpeg",
-            "stream2": "videos/movie.Mjpeg",
             "stream3": "videos/movie.Mjpeg"
         }
     }
