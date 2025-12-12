@@ -46,7 +46,7 @@
       </services>
     </device>
     <device id="8" name="R3" icon="" canvas="0" type="router" class="" image="" compose="" compose_name="">
-      <position x="259.0" y="432.0" lat="47.57523953212931" lon="-122.12883426387118" alt="2.0"/>
+      <position x="243.0" y="434.0" lat="47.57522135144339" lon="-122.12904985953938" alt="2.0"/>
       <services>
         <service name="OSPFv3"/>
         <service name="IPForward"/>
@@ -154,13 +154,13 @@
       </services>
     </device>
     <device id="1" name="S2" icon="" canvas="0" type="host" class="" image="" compose="" compose_name="">
-      <position x="51.0" y="380.0" lat="47.57571222774771" lon="-122.13163700755763" alt="2.0"/>
+      <position x="45.0" y="432.0" lat="47.57523953212931" lon="-122.1317178559332" alt="2.0"/>
       <services>
         <service name="SSH"/>
         <service name="DefaultRoute"/>
       </services>
     </device>
-    <device id="2" name="n2" icon="" canvas="0" type="host" class="" image="" compose="" compose_name="">
+    <device id="2" name="S1" icon="" canvas="0" type="host" class="" image="" compose="" compose_name="">
       <position x="955.0" y="322.0" lat="47.57623946013413" lon="-122.11945585230497" alt="2.0"/>
       <services>
         <service name="SSH"/>
@@ -204,6 +204,11 @@
       <iface2 id="0" name="eth0" mac="00:00:00:aa:00:17" ip4="10.0.20.20" ip4_mask="24"/>
       <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
     </link>
+    <link node1="14" node2="16">
+      <iface1 id="2" name="veth14.2.1"/>
+      <iface2 id="0" name="eth0" mac="00:00:00:aa:00:18" ip4="10.0.20.21" ip4_mask="24"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
     <link node1="20" node2="22">
       <iface1 id="0" name="veth20.0.1"/>
       <iface2 id="0" name="eth0" mac="00:00:00:aa:00:27" ip4="10.0.19.21" ip4_mask="24"/>
@@ -214,24 +219,9 @@
       <iface2 id="2" name="eth2" mac="00:00:00:aa:00:25" ip4="10.0.19.1" ip4_mask="24"/>
       <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
     </link>
-    <link node1="14" node2="16">
-      <iface1 id="2" name="veth14.2.1"/>
-      <iface2 id="0" name="eth0" mac="00:00:00:aa:00:18" ip4="10.0.20.21" ip4_mask="24"/>
-      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
-    </link>
     <link node1="20" node2="21">
       <iface1 id="2" name="veth20.2.1"/>
       <iface2 id="0" name="eth0" mac="00:00:00:aa:00:26" ip4="10.0.19.20" ip4_mask="24"/>
-      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
-    </link>
-    <link node1="3" node2="12">
-      <iface1 id="3" name="eth3" mac="00:00:00:aa:00:0c" ip4="10.0.3.1" ip4_mask="24"/>
-      <iface2 id="0" name="eth0" mac="00:00:00:aa:00:0d" ip4="10.0.3.2" ip4_mask="24"/>
-      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
-    </link>
-    <link node1="4" node2="12">
-      <iface1 id="2" name="eth2" mac="00:00:00:aa:00:0e" ip4="10.0.4.1" ip4_mask="24"/>
-      <iface2 id="1" name="eth1" mac="00:00:00:aa:00:0f" ip4="10.0.4.2" ip4_mask="24"/>
       <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
     </link>
     <link node1="3" node2="4">
@@ -244,24 +234,19 @@
       <iface2 id="0" name="eth0" mac="00:00:00:aa:00:08" ip4="10.0.2.2" ip4_mask="24"/>
       <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
     </link>
+    <link node1="3" node2="12">
+      <iface1 id="3" name="eth3" mac="00:00:00:aa:00:0c" ip4="10.0.3.1" ip4_mask="24"/>
+      <iface2 id="0" name="eth0" mac="00:00:00:aa:00:0d" ip4="10.0.3.2" ip4_mask="24"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="4" node2="12">
+      <iface1 id="2" name="eth2" mac="00:00:00:aa:00:0e" ip4="10.0.4.1" ip4_mask="24"/>
+      <iface2 id="1" name="eth1" mac="00:00:00:aa:00:0f" ip4="10.0.4.2" ip4_mask="24"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
     <link node1="8" node2="12">
       <iface1 id="2" name="eth2" mac="00:00:00:aa:00:10" ip4="10.0.5.1" ip4_mask="24"/>
       <iface2 id="2" name="eth2" mac="00:00:00:aa:00:11" ip4="10.0.5.2" ip4_mask="24"/>
-      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
-    </link>
-    <link node1="8" node2="18">
-      <iface1 id="3" name="eth3" mac="00:00:00:aa:00:1b" ip4="10.0.9.1" ip4_mask="24"/>
-      <iface2 id="0" name="eth0" mac="00:00:00:aa:00:1c" ip4="10.0.9.2" ip4_mask="24"/>
-      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
-    </link>
-    <link node1="12" node2="18">
-      <iface1 id="4" name="eth4" mac="00:00:00:aa:00:1d" ip4="10.0.10.1" ip4_mask="24"/>
-      <iface2 id="1" name="eth1" mac="00:00:00:aa:00:1e" ip4="10.0.10.2" ip4_mask="24"/>
-      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
-    </link>
-    <link node1="17" node2="18">
-      <iface1 id="1" name="eth1" mac="00:00:00:aa:00:1f" ip4="10.0.11.1" ip4_mask="24"/>
-      <iface2 id="2" name="eth2" mac="00:00:00:aa:00:20" ip4="10.0.11.2" ip4_mask="24"/>
       <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
     </link>
     <link node1="4" node2="13">
@@ -274,19 +259,34 @@
       <iface2 id="0" name="eth0" mac="00:00:00:aa:00:1a" ip4="10.0.8.2" ip4_mask="24"/>
       <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
     </link>
+    <link node1="17" node2="18">
+      <iface1 id="1" name="eth1" mac="00:00:00:aa:00:1f" ip4="10.0.11.1" ip4_mask="24"/>
+      <iface2 id="2" name="eth2" mac="00:00:00:aa:00:20" ip4="10.0.11.2" ip4_mask="24"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="8" node2="18">
+      <iface1 id="3" name="eth3" mac="00:00:00:aa:00:1b" ip4="10.0.9.1" ip4_mask="24"/>
+      <iface2 id="0" name="eth0" mac="00:00:00:aa:00:1c" ip4="10.0.9.2" ip4_mask="24"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
+    <link node1="12" node2="18">
+      <iface1 id="4" name="eth4" mac="00:00:00:aa:00:1d" ip4="10.0.10.1" ip4_mask="24"/>
+      <iface2 id="1" name="eth1" mac="00:00:00:aa:00:1e" ip4="10.0.10.2" ip4_mask="24"/>
+      <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
+    </link>
     <link node1="17" node2="19">
       <iface1 id="2" name="eth2" mac="00:00:00:aa:00:21" ip4="10.0.12.1" ip4_mask="24"/>
       <iface2 id="0" name="eth0" mac="00:00:00:aa:00:22" ip4="10.0.12.2" ip4_mask="24"/>
       <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
     </link>
-    <link node1="23" node2="24">
-      <iface1 id="2" name="eth2" mac="00:00:00:aa:00:2c" ip4="10.0.16.1" ip4_mask="24"/>
-      <iface2 id="0" name="eth0" mac="00:00:00:aa:00:2d" ip4="10.0.16.2" ip4_mask="24"/>
+    <link node1="18" node2="19">
+      <iface1 id="3" name="eth3" mac="00:00:00:aa:00:23" ip4="10.0.13.1" ip4_mask="24"/>
+      <iface2 id="1" name="eth1" mac="00:00:00:aa:00:24" ip4="10.0.13.2" ip4_mask="24"/>
       <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
     </link>
-    <link node1="19" node2="24">
-      <iface1 id="3" name="eth3" mac="00:00:00:aa:00:2e" ip4="10.0.17.1" ip4_mask="24"/>
-      <iface2 id="1" name="eth1" mac="00:00:00:aa:00:2f" ip4="10.0.17.2" ip4_mask="24"/>
+    <link node1="12" node2="13">
+      <iface1 id="3" name="eth3" mac="00:00:00:aa:00:14" ip4="10.0.7.1" ip4_mask="24"/>
+      <iface2 id="1" name="eth1" mac="00:00:00:aa:00:15" ip4="10.0.7.2" ip4_mask="24"/>
       <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
     </link>
     <link node1="13" node2="23">
@@ -299,14 +299,14 @@
       <iface2 id="1" name="eth1" mac="00:00:00:aa:00:2b" ip4="10.0.15.2" ip4_mask="24"/>
       <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
     </link>
-    <link node1="18" node2="19">
-      <iface1 id="3" name="eth3" mac="00:00:00:aa:00:23" ip4="10.0.13.1" ip4_mask="24"/>
-      <iface2 id="1" name="eth1" mac="00:00:00:aa:00:24" ip4="10.0.13.2" ip4_mask="24"/>
+    <link node1="23" node2="24">
+      <iface1 id="2" name="eth2" mac="00:00:00:aa:00:2c" ip4="10.0.16.1" ip4_mask="24"/>
+      <iface2 id="0" name="eth0" mac="00:00:00:aa:00:2d" ip4="10.0.16.2" ip4_mask="24"/>
       <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
     </link>
-    <link node1="12" node2="13">
-      <iface1 id="3" name="eth3" mac="00:00:00:aa:00:14" ip4="10.0.7.1" ip4_mask="24"/>
-      <iface2 id="1" name="eth1" mac="00:00:00:aa:00:15" ip4="10.0.7.2" ip4_mask="24"/>
+    <link node1="19" node2="24">
+      <iface1 id="3" name="eth3" mac="00:00:00:aa:00:2e" ip4="10.0.17.1" ip4_mask="24"/>
+      <iface2 id="1" name="eth1" mac="00:00:00:aa:00:2f" ip4="10.0.17.2" ip4_mask="24"/>
       <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
     </link>
     <link node1="1" node2="3">
@@ -320,7 +320,7 @@
       <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
     </link>
     <link node1="6" node2="5">
-      <iface1 id="0" name="eth0" ip4="10.0.2.21" ip4_mask="24"/>
+      <iface1 id="0" name="eth0" mac="00:00:00:aa:00:00" ip4="10.0.2.21" ip4_mask="24"/>
       <iface2 id="2" name="veth5.2.1"/>
       <options delay="0" bandwidth="0" loss="0.0" dup="0" jitter="0" unidirectional="0" buffer="0"/>
     </link>
