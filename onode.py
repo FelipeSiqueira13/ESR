@@ -619,7 +619,7 @@ def forward_mm(raw_packet: bytes, stream_id: str, sender_ip: str, db: DataBase, 
     for viz in downstream:
         try:
             sock.sendto(raw_packet, (viz, SENDER_PORT))
-            # log_ev("MM_FWD", stream=stream_id, to=viz, from_=sender_ip)
+            log_ev("MM_FWD", stream=stream_id, to=viz, from_=sender_ip)
         except Exception as e:
             log_ev("MM_FWD_ERR", stream=stream_id, to=viz, err=e)
     
