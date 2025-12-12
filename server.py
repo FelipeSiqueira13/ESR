@@ -145,7 +145,7 @@ def sender(sdb:ServerDataBase):
                             print(f"Error sending frame {vs.frameNbr()} for {stream_key} to {vizinho}: {e}")
             
             elapsed = time.time() - loop_start
-            time.sleep(max(0, 0.05 - elapsed))
+            time.sleep(max(0, 0.034 - elapsed))
         except Exception as e:
             print(f"Error in sender: {e}")
     sckt.close()

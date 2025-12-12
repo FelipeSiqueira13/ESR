@@ -5,7 +5,7 @@ import socket
 import datetime as dt
 from pathlib import Path 
 
-CURRENT_TOPOLOGY = "topology1"
+CURRENT_TOPOLOGY = "topology2"
 class ServerDataBase():
     def __init__(self, name):
         self.name = name

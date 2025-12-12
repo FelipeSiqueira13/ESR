@@ -25,7 +25,7 @@ from pathlib import Path
 SENDER_PORT = 40332  # porta de receção UDP de dados (MM)
 CLIENT_HEARTBEAT_PORT = 40333  # porta TCP para heartbeats/ADD_NEIGHBOUR
 MJPEG_HTTP_PORT = 8040
-CURRENT_TOPOLOGY = "topology1"
+CURRENT_TOPOLOGY = "topology2"
 HEARTBEAT_INTERVAL = 5
 
 def _detect_gui_support():
