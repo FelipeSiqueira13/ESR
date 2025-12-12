@@ -26,7 +26,7 @@ SENDER_PORT = 40332  # porta de receção UDP de dados (MM)
 CLIENT_HEARTBEAT_PORT = 40333  # porta TCP para heartbeats/ADD_NEIGHBOUR
 MJPEG_HTTP_PORT = 8040
 CURRENT_TOPOLOGY = "topology2"
-HEARTBEAT_INTERVAL = 5
+HEARTBEAT_INTERVAL = 1
 
 def _detect_gui_support():
     """Determina se é possível abrir uma janela local para o vídeo."""
