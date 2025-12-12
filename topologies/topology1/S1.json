@@ -2,6 +2,11 @@
     "S1": {
         "10.0.0.10": [
             "10.0.0.1"
-        ]
+        ],
+        "streams": {
+            "stream1": "videos/movie.Mjpeg",
+            "stream2": "videos/movie.Mjpeg",
+            "stream3": "videos/movie.Mjpeg"
+        }
     }
 }

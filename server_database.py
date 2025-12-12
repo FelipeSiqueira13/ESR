@@ -3,15 +3,28 @@ import sys
 import threading
 import socket
 import datetime as dt
+from pathlib import Path 
 
+CURRENT_TOPOLOGY = "topology1"
 class ServerDataBase():
     def __init__(self, name):
         self.name = name
 
-        with open('server_config.json', 'r') as file:
-            server_info = json.load(file)
+        config_file = Path("topologies") / CURRENT_TOPOLOGY / f"{name}.json"
+
+        try:
+            with open(config_file, 'r') as file:
+                server_info = json.load(file)
+        except FileNotFoundError:
+            print("Error: File Not Found!")
+            sys.exit(1)
         
-        self.server_streams = server_info.get(name, {}).get("streams", {})
+        server_data = server_info.get(name, {})
+
+        self.server_streams = server_data.get("streams", {})
+
+        ip_data = {k: v for k, v in server_data.items() if k != "streams"}
+
         # server_vizinhos: mapeia cada vizinho conhecido para o estado/métricas que mantemos dele
         # Ex.: {"10.0.0.10": 1, "10.0.1.2": 0}
         self.server_vizinhos = {}
@@ -23,14 +36,13 @@ class ServerDataBase():
         self.pending_metric_requests = {}
         self.stream_metrics = {}
 
-        with open('config.json', 'r') as file:
-            ip_config = json.load(file)
-            data = ip_config.get(name, {})
-
-        self.my_ip = list(data.keys())[0] if data else None
+        self.my_ip = None
+        if ip_data:
+            first_ip = list(ip_data.keys())[0]
+            self.my_ip = first_ip
 
         # Inicializa estado para cada interface local e cada vizinho configurado
-        for ip, neighs in data.items():
+        for ip, neighs in ip_data.items():
             self.server_vizinhos[ip] = 0  # minha(s) interfaces
             self.neighbor_last_seen[ip] = None
             for viz in (neighs if isinstance(neighs, list) else [neighs]):
