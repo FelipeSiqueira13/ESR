@@ -20,9 +20,11 @@ from msg import Message
 from database import DataBase
 from onode import send_message
 from SimplePacket import SimplePacket
+from pathlib import Path
 
 SENDER_PORT = 40332  # porta de receção UDP de dados (MM)
 MJPEG_HTTP_PORT = 8040
+CURRENT_TOPOLOGY = "topology1"
 
 def _detect_gui_support():
     """Determina se é possível abrir uma janela local para o vídeo."""
@@ -101,8 +103,15 @@ def get_node_info(clientName):
         return None, None
     
 def get_client_ip(clientName):
-    with open('config.json', 'r') as file:
-        ip_config = json.load(file)
+
+    config_file = Path("topologies") / CURRENT_TOPOLOGY / f"{clientName}.json"
+    try:
+        with open(config_file, 'r') as file:
+            ip_config = json.load(file)
+    except FileNotFoundError:
+        print(f"Error : File Not Found")
+        print(f"Currente Topology: {CURRENT_TOPOLOGY}")
+        return None
     
     client_data = ip_config.get(clientName, {})
     

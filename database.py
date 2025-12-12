@@ -4,14 +4,23 @@ import sys
 import threading
 import math
 import datetime as dt
+from pathlib import Path
+
+CURRENT_TOPOLOGY = "topology1"
 
 class DataBase():
 
     def __init__(self, name):
 
         # ----------- CARREGA CONFIG E VIZINHOS DO ARQUIVO 1 -----------
-        with open('config.json', 'r') as file:
-            ip_config = json.load(file)
+        config_file = Path("topologies") / CURRENT_TOPOLOGY / f"{name}.json"
+
+        try:
+            with open(config_file, 'r') as file:
+                ip_config = json.load(file)
+        except FileNotFoundError:
+            print("Error: File Not Found")
+            sys.exit(1)
 
         # agora os valores podem ser listas; normaliza para dict ip -> [viz1, viz2, ...]
         raw = ip_config.get(name, {})
