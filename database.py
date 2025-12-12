@@ -201,6 +201,28 @@ class DataBase():
             # Se for do mesmo pai, atualiza sempre (para refletir piora ou melhora)
             if parent_ip == curr_parent:
                 self.best_cost[stream_id] = cost
+                
+                # Se o custo piorou, verifica se existe alguém melhor na tabela de métricas
+                if cost > prev:
+                    best_alt = None
+                    best_alt_cost = cost
+                    
+                    for viz, metrics in self.streams_metrics.items():
+                        if viz == parent_ip: continue
+                        
+                        metric = metrics.get(stream_id, 0)
+                        if metric > 0:
+                            # Verifica se vizinho é melhor considerando histerese
+                            if metric < best_alt_cost * self.hysteresis_factor:
+                                best_alt = viz
+                                best_alt_cost = metric
+                    
+                    if best_alt:
+                        print(f"[DB] Switching from {curr_parent} ({cost:.1f}) to {best_alt} ({best_alt_cost:.1f}) due to degradation")
+                        self.best_parent[stream_id] = best_alt
+                        self.best_cost[stream_id] = best_alt_cost
+                        return True
+
                 return True
 
             if cost < prev * self.hysteresis_factor:
