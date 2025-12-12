@@ -445,9 +445,23 @@ def _playback_loop(stream_id):
                         time.sleep(0.01)
                         continue
 
+                # Limpeza de frames antigos (atrasados que chegaram depois de termos pulado)
+                # Se houver frames no buffer menores que 'expected', descarte-os.
+                if expected is not None:
+                    old_frames = [k for k in buf.keys() if k < expected]
+                    if old_frames:
+                        print(f"[DEBUG] Descartando {len(old_frames)} frames antigos: {old_frames}")
+                        for k in old_frames:
+                            buf.pop(k)
+
                 # Tenta pegar o frame esperado
                 if expected in buf:
                     frame = buf.pop(expected)
+                    
+                    # Debug periódico para saber que está vivo
+                    if expected % 30 == 0:
+                        print(f"[DEBUG] Playing frame {expected}. Buffer: {len(buf)}")
+                        
                     expected += 1
                     last_frame_time = current_time
                 else:
