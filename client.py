@@ -26,6 +26,7 @@ SENDER_PORT = 40332  # porta de receção UDP de dados (MM)
 CLIENT_HEARTBEAT_PORT = 40333  # porta TCP para heartbeats/ADD_NEIGHBOUR
 MJPEG_HTTP_PORT = 8040
 CURRENT_TOPOLOGY = "topology1"
+HEARTBEAT_INTERVAL = 5
 
 def _detect_gui_support():
     """Determina se é possível abrir uma janela local para o vídeo."""
@@ -201,6 +202,19 @@ def heartbeat_listener(bind_ip: str):
         hb_sock.close()
     except Exception:
         pass
+
+
+def heartbeat_sender(target_host: str, src_ip: str):
+    """Envia ADD_NEIGHBOUR periódico para manter o roteador marcando o cliente como vivo."""
+    global _running
+    while _running:
+        try:
+            msg = Message(Message.ADD_NEIGHBOUR, src_ip, "")
+            with socket.create_connection((target_host, CLIENT_HEARTBEAT_PORT), timeout=2.0) as s:
+                _send_buffer(s, msg.serialize() + b"\n")
+        except Exception:
+            pass
+        time.sleep(HEARTBEAT_INTERVAL)
 
 def send_tcp_request(node_host, node_port, msg: Message):
     try:
@@ -630,6 +644,10 @@ def main():
     # Inicia listener de heartbeat/controle leve para não derrubar o cliente
     t_hb = threading.Thread(target=heartbeat_listener, args=(my_ip,), daemon=True)
     t_hb.start()
+
+    # Envia heartbeats periódicos para o roteador, como o servidor faz
+    t_hb_send = threading.Thread(target=heartbeat_sender, args=(node_host, my_ip), daemon=True)
+    t_hb_send.start()
 
     streams = get_available_streams(node_host, node_port, clientName)
     if not streams:
