@@ -606,7 +606,7 @@ def _store_frame(stream_id: str, frame_num: int, frame_data: bytes):
     print(f"[ONODE][FRAME] stored stream={stream_id} frame={frame_num} size={len(frame_data)}B")
 
 
-def forward_mm(raw_packet: bytes, stream_id: str, sender_ip: str, db: DataBase):
+def forward_mm(raw_packet: bytes, stream_id: str, sender_ip: str, db: DataBase, sock: socket.socket = None):
     """Replica o pacote MM para vizinhos downstream ativos, exceto quem enviou."""
     try:
         downstream = [viz for viz in db.get_downstream(stream_id) if viz != sender_ip]
@@ -616,14 +616,20 @@ def forward_mm(raw_packet: bytes, stream_id: str, sender_ip: str, db: DataBase):
     if not downstream:
         return
 
-    udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    close_sock = False
+    if sock is None:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        close_sock = True
+
     for viz in downstream:
         try:
-            udp_sock.sendto(raw_packet, (viz, SENDER_PORT))
+            sock.sendto(raw_packet, (viz, SENDER_PORT))
             # log_ev("MM_FWD", stream=stream_id, to=viz, from_=sender_ip)
         except Exception as e:
             log_ev("MM_FWD_ERR", stream=stream_id, to=viz, err=e)
-    udp_sock.close()
+    
+    if close_sock:
+        sock.close()
 
 
 def _normalize_stream(stream_id: str, origin: Optional[str]) -> str:
@@ -807,7 +813,7 @@ def data_listener(db: DataBase):
             except Exception as e:
                 print(f"[ONODE][MM][ERR] batch decode: {e}")
 
-            forward_mm(raw, stream_id, sender_ip, db)
+            forward_mm(raw, stream_id, sender_ip, db, udp_sock)
 
         except Exception as e:
             print(f"[ONODE][MM][ERR] {e}")

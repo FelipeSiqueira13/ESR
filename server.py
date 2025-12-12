@@ -94,6 +94,7 @@ def sender(sdb:ServerDataBase):
 
     streams_active = {}
     while True:
+        loop_start = time.time()
         try:
             with sdb.lock:
                 stream_viz_copy = dict(sdb.stream_vizinhos)
@@ -143,8 +144,9 @@ def sender(sdb:ServerDataBase):
                         except Exception as e:
                             print(f"Error sending frame {vs.frameNbr()} for {stream_key} to {vizinho}: {e}")
             
-            # Ajusta o sleep para manter ~30fps (0.033s por frame)
-            time.sleep(0.033)
+            # Ajusta o sleep para manter ~33fps (0.030s por frame) para garantir buffer cheio
+            elapsed = time.time() - loop_start
+            time.sleep(max(0, 0.030 - elapsed))
         except Exception as e:
             print(f"Error in sender: {e}")
     sckt.close()
