@@ -204,8 +204,9 @@ def udp_listener(bind_ip):
     global _udp_sock
     _udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     _udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    _udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024) # Increase buffer to 1MB
     _udp_sock.bind((bind_ip, SENDER_PORT))
-    print(f"[CLIENT][UDP] listening on {bind_ip}:{SENDER_PORT}")
+    # print(f"[CLIENT][UDP] listening on {bind_ip}:{SENDER_PORT}")
 
     while _running:
         try:
@@ -273,9 +274,9 @@ def udp_listener(bind_ip):
                 continue
 
             # Exibe bits dos frames recebidos em vez das mensagens de debug
-            if _running and printed_bits:
-                for frame_num, bits in printed_bits:
-                    print(f"[CLIENT][BITS] stream={stream_id} frame={frame_num} bits={bits}...")
+            # if _running and printed_bits:
+            #     for frame_num, bits in printed_bits:
+            #         print(f"[CLIENT][BITS] stream={stream_id} frame={frame_num} bits={bits}...")
         except OSError:
             break
         except Exception as e:

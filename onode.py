@@ -620,7 +620,7 @@ def forward_mm(raw_packet: bytes, stream_id: str, sender_ip: str, db: DataBase):
     for viz in downstream:
         try:
             udp_sock.sendto(raw_packet, (viz, SENDER_PORT))
-            log_ev("MM_FWD", stream=stream_id, to=viz, from_=sender_ip)
+            # log_ev("MM_FWD", stream=stream_id, to=viz, from_=sender_ip)
         except Exception as e:
             log_ev("MM_FWD_ERR", stream=stream_id, to=viz, err=e)
     udp_sock.close()
@@ -746,6 +746,7 @@ def data_listener(db: DataBase):
     print("Data listener thread started (UDP)")
     udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024) # Increase buffer to 1MB
     udp_sock.bind((db.my_ip, SENDER_PORT))
 
     while True:
@@ -784,7 +785,7 @@ def data_listener(db: DataBase):
                 if len(batch_data) < 1:
                      raise ValueError("Empty batch")
                 count = struct.unpack("!B", batch_data[:1])[0]
-                print(f"[ONODE][MM][RX] stream={stream_id} frame_base={frame_num} batch_size={count} from={sender_ip}")
+                # print(f"[ONODE][MM][RX] stream={stream_id} frame_base={frame_num} batch_size={count} from={sender_ip}")
                 
                 # Se não há downstream ativo, assume nó folha/cliente e guarda frames
                 try:

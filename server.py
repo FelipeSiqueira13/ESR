@@ -210,10 +210,12 @@ def sender(sdb:ServerDataBase):
                             print(f"Error sending final batch for {stream_key} to {vizinho}: {e}")
             
             # Log periódico para debug
-            if time.time() % 2 < 0.05:
-                 print(f"[SERVER][DEBUG] Active streams: {list(streams_active.keys())} Targets: {sdb.get_streams_vizinhos()}")
+            # if time.time() % 2 < 0.05:
+            #      print(f"[SERVER][DEBUG] Active streams: {list(streams_active.keys())} Targets: {sdb.get_streams_vizinhos()}")
 
-            time.sleep(0.03333 * 3)
+            # Ajusta o sleep para corresponder aproximadamente à duração dos 5 frames enviados (30fps)
+            # 5 * 0.0333 = 0.166s. Usamos um valor ligeiramente menor para garantir que o buffer do cliente não esvazie.
+            time.sleep(0.03333 * 4)
         except Exception as e:
             print(f"Error in sender: {e}")
     sckt.close()
