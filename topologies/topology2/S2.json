@@ -4,7 +4,7 @@
             "10.0.0.1"
         ],
         "streams": {
-            "stream2": "videos/movie.Mjpeg",
+            "stream2": "videos/marmot.Mjpeg",
             "stream3": "videos/CuteGoat.Mjpeg"
         }
     }

@@ -24,7 +24,7 @@ def convert_to_custom_mjpeg(input_video_path, output_mjpeg_path):
 
             # Codifica o frame atual para formato JPEG
             # O segundo parâmetro [int(cv2.IMWRITE_JPEG_QUALITY), 50] define a qualidade (0-100)
-            ret, jpeg_data = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 30])
+            ret, jpeg_data = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 25])
             
             if not ret:
                 continue
