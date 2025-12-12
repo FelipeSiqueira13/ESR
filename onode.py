@@ -29,7 +29,7 @@ TTL_DEFAULT = 8
 ANNOUNCE_TYPE = Message.VIDEO_METRIC_REQUEST  # reutilizamos como ANNOUNCE
 
 HEARTBEAT_INTERVAL = 5      # segundos
-HEARTBEAT_TIMEOUT  = 15     # segundos
+HEARTBEAT_TIMEOUT  = 1000     # segundos
 HYST_FACTOR = 0.9           # mesma ideia do DB; opcional sobrescrever
 
 
