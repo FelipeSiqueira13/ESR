@@ -19,7 +19,7 @@ ROUTERS_SENDER_PORT = 40334
 METRIC_INTERVAL_SECONDS = 5
 HEARTBEAT_INTERVAL = 1
 HEARTBEAT_TIMEOUT = 15
-FPS = 20
+FPS = 30
 
 def _send_buffer(sock: socket.socket, payload: bytes):
     view = memoryview(payload)
