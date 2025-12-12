@@ -711,6 +711,9 @@ def heartbeat_sender(db: DataBase):
             send_message(msg, viz, ROUTERS_RECEIVER_PORT)
         time.sleep(HEARTBEAT_INTERVAL)
 
+_stream_last_seen = {}
+_stream_last_seen_lock = threading.Lock()
+
 def heartbeat_check(db: DataBase):
     """Verifica timeouts de vizinhos; se offline, invalida parents e streams."""
     while True:
@@ -751,6 +754,32 @@ def heartbeat_check(db: DataBase):
                     msg = Message(Message.STREAM_REQUEST, db.get_my_ip(parent), stream_id)
                     send_message(msg, parent, RECEIVER_PORT)
                     log_ev("HB_REROUTE", stream=stream_id, new_parent=parent)
+        
+        # --- STREAM WATCHDOG ---
+        # Verifica se estamos recebendo streams que deveríamos estar recebendo (temos downstream)
+        # Se não recebemos nada por 2s, reenviamos o pedido ao best_parent
+        now = time.time()
+        streams_to_check = []
+        with db.lock:
+            for stream_id in db.downstream.keys():
+                if db.has_downstream(stream_id):
+                    streams_to_check.append(stream_id)
+        
+        for stream_id in streams_to_check:
+            with _stream_last_seen_lock:
+                last = _stream_last_seen.get(stream_id, 0)
+            
+            # Se nunca vimos ou faz muito tempo que não vemos
+            if now - last > 2.0:
+                parent = _upstream_for(stream_id, db)
+                if parent:
+                    # log_ev("STREAM_STARVE", stream=stream_id, parent=parent, last_seen_ago=f"{now-last:.1f}s")
+                    msg = Message(Message.STREAM_REQUEST, db.get_my_ip(parent), stream_id)
+                    send_message(msg, parent, RECEIVER_PORT)
+                    # Atualiza last_seen para não spammar imediatamente (backoff simples)
+                    with _stream_last_seen_lock:
+                        _stream_last_seen[stream_id] = now 
+
         time.sleep(HEARTBEAT_INTERVAL)
 
 
@@ -793,6 +822,10 @@ def data_listener(db: DataBase):
             except Exception:
                 print(f"[ONODE][MM][DROP] bad stream_id bytes from {sender_ip}")
                 continue
+
+            # Atualiza timestamp de recebimento para o Watchdog
+            with _stream_last_seen_lock:
+                _stream_last_seen[stream_id] = time.time()
 
             # Valida origem esperada (best_parent)
             upstream = db.get_best_parent(stream_id) or db.getStreamSource(stream_id)
