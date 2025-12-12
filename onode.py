@@ -47,7 +47,6 @@ def _send_buffer(sock: socket.socket, payload: bytes):
         total_sent += sent
 
 def send_message(msg:Message, host:str, port:int):
-    print(f"[ONODE][QUEUE] type={msg.getType()} -> {host}:{port} data={msg.getData()}")
     send_queue.put((msg, host, port))
 
 def _upstream_for(stream_id: str, db: DataBase):
@@ -431,7 +430,6 @@ def sender(db:DataBase):
                         sckt = connection_cache[key]
                         sckt.sendall(payload)
                         success = True
-                        log_ev("TX_OK", type=msg.getType(), host=host, port=port, cached=True)
                         break
 
                     # nova conexão
@@ -441,7 +439,6 @@ def sender(db:DataBase):
                     _send_buffer(sckt, payload)
                     connection_cache[key] = sckt
                     success = True
-                    log_ev("TX_OK", type=msg.getType(), host=host, port=port, cached=False)
                     break
 
                 except Exception as e:
@@ -603,7 +600,6 @@ def _store_frame(stream_id: str, frame_num: int, frame_data: bytes):
             oldest = min(frames.keys())
             frames.pop(oldest, None)
         frames[frame_num] = frame_data
-    print(f"[ONODE][FRAME] stored stream={stream_id} frame={frame_num} size={len(frame_data)}B")
 
 
 def forward_mm(raw_packet: bytes, stream_id: str, sender_ip: str, db: DataBase, sock: socket.socket = None):

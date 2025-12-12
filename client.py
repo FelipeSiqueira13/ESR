@@ -230,8 +230,6 @@ def udp_listener(bind_ip):
         try:
             raw, addr = _udp_sock.recvfrom(65535)
             packets_received += 1
-            if packets_received % 100 == 0:
-                print(f"[CLIENT][UDP] Total packets received: {packets_received}")
 
             if not _running: break
             try:
@@ -321,10 +319,7 @@ def _display_frame(frame_data, window_title):
             _ffplay_process.stdin.flush()
             return True
         except (BrokenPipeError, OSError):
-            # print("[CLIENT] ffplay closed/crashed.")
             _stop_ffplay()
-            # Fallback to CV2 if available immediately?
-            # Let's just return False so loop continues and tries to restart next time
     
     # 2. Fallback para OpenCV
     if not _GUI_AVAILABLE:
@@ -434,8 +429,8 @@ def _playback_loop(stream_id):
                         print(f"[CLIENT] Buffer cheio ({len(buf)} frames). Iniciando playback em {expected}.")
                     else:
                         # Ainda enchendo buffer inicial
-                        if len(buf) % 5 == 0: # Print progress
-                             print(f"[DEBUG] Buffering... {len(buf)}/{MIN_BUFFER}")
+                        if len(buf) % 10 == 0:
+                            print(f"[CLIENT][BUF] enchendo buffer: {len(buf)}/{MIN_BUFFER}")
                         time.sleep(0.01)
                         continue
                 
@@ -443,10 +438,8 @@ def _playback_loop(stream_id):
                 if buffering:
                     if len(buf) >= MIN_BUFFER:
                         buffering = False
-                        print(f"[CLIENT] Re-buffering concluído. Buffer: {len(buf)}")
+                        print(f"[CLIENT][BUF] rebuffer concluído; buffer={len(buf)}")
                     else:
-                        if len(buf) % 5 == 0:
-                             print(f"[DEBUG] Re-buffering... {len(buf)}/{MIN_BUFFER}")
                         time.sleep(0.01)
                         continue
 
@@ -455,7 +448,6 @@ def _playback_loop(stream_id):
                 if expected is not None:
                     old_frames = [k for k in buf.keys() if k < expected]
                     if old_frames:
-                        print(f"[DEBUG] Descartando {len(old_frames)} frames antigos: {old_frames}")
                         for k in old_frames:
                             buf.pop(k)
 
@@ -463,10 +455,6 @@ def _playback_loop(stream_id):
                 if expected in buf:
                     frame = buf.pop(expected)
                     
-                    # Debug periódico para saber que está vivo
-                    if expected % 30 == 0:
-                        print(f"[DEBUG] Playing frame {expected}. Buffer: {len(buf)}")
-                        
                     expected += 1
                     last_frame_time = current_time
                 else:
@@ -478,12 +466,11 @@ def _playback_loop(stream_id):
                         wait_time = current_time - last_frame_time
                         if wait_time < MAX_WAIT_MISSING:
                             # Ainda damos chance para o frame chegar
-                            # print(f"[DEBUG] Waiting for frame {expected}. Waited {wait_time:.3f}s")
                             pass 
                         else:
                             # Timeout de espera: pula para o próximo disponível
                             next_num = min(higher)
-                            print(f"[CLIENT] Frame {expected} perdido/atrasado (Waited {wait_time:.3f}s). Pulando para {next_num}. Buffer size: {len(buf)}")
+                            print(f"[CLIENT][DROP] frame {expected} atrasado; pulando para {next_num} (buffer={len(buf)})")
                             frame = buf.pop(next_num)
                             expected = next_num + 1
                             last_frame_time = current_time
@@ -491,7 +478,7 @@ def _playback_loop(stream_id):
                         # Não tem esperado nem futuros -> Buffer vazio ou stream parou
                         # Se ficar vazio, entra em modo buffering
                         if len(buf) == 0:
-                            print(f"[CLIENT] Buffer vazio após frame {expected-1}. Pausando para re-buffer...")
+                            print(f"[CLIENT][BUF] vazio após frame {expected-1}; rebuffer...")
                             buffering = True
 
         if frame is None:
@@ -500,7 +487,6 @@ def _playback_loop(stream_id):
             
         shown = _display_frame(frame, window_title)
         if not shown:
-            print(f"[DEBUG] Frame {expected-1} not shown (display error/headless).")
             _update_http_frame(stream_id, frame)
             time.sleep(0.02)
             continue

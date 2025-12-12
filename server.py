@@ -264,7 +264,6 @@ def metric_updater(sdb:ServerDataBase):
     while True:
         try:
             awake_neighbors = sdb.get_awake_neighbors()
-            print(awake_neighbors)
             for viz in awake_neighbors:
                 streams = sdb.get_streams()
                 start_time = dt.datetime.now()
