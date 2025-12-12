@@ -23,6 +23,7 @@ from SimplePacket import SimplePacket
 from pathlib import Path
 
 SENDER_PORT = 40332  # porta de receção UDP de dados (MM)
+CLIENT_HEARTBEAT_PORT = 40333  # porta TCP para heartbeats/ADD_NEIGHBOUR
 MJPEG_HTTP_PORT = 8040
 CURRENT_TOPOLOGY = "topology1"
 
@@ -54,6 +55,7 @@ _latest_frame = {}
 _http_server = None
 _http_thread = None
 _ffplay_process = None
+_client_ip = None
 
 def _detect_ffplay():
     return shutil.which("ffplay") is not None
@@ -146,6 +148,59 @@ def _send_buffer(sock: socket.socket, payload: bytes):
         if sent == 0:
             raise ConnectionError("Socket connection broken")
         total_sent += sent
+
+
+def _handle_hb_connection(conn: socket.socket, addr, my_ip: str):
+    buffer = b""
+    try:
+        while True:
+            data = conn.recv(4096)
+            if not data:
+                break
+            buffer += data
+            while b"\n" in buffer:
+                msg_bytes, buffer = buffer.split(b"\n", 1)
+                if not msg_bytes:
+                    continue
+                try:
+                    msg = Message.deserialize(msg_bytes)
+                except Exception:
+                    continue
+
+                if msg.getType() == Message.ADD_NEIGHBOUR:
+                    resp = Message(Message.RESP_NEIGHBOUR, my_ip, "")
+                    _send_buffer(conn, resp.serialize() + b"\n")
+    except Exception:
+        pass
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def heartbeat_listener(bind_ip: str):
+    """Escuta heartbeats dos roteadores e responde RESP_NEIGHBOUR."""
+    global _running
+    hb_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    hb_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    hb_sock.bind((bind_ip, CLIENT_HEARTBEAT_PORT))
+    hb_sock.listen(5)
+    hb_sock.settimeout(1.0)
+
+    while _running:
+        try:
+            conn, addr = hb_sock.accept()
+        except socket.timeout:
+            continue
+        except OSError:
+            break
+        threading.Thread(target=_handle_hb_connection, args=(conn, addr, bind_ip), daemon=True).start()
+
+    try:
+        hb_sock.close()
+    except Exception:
+        pass
 
 def send_tcp_request(node_host, node_port, msg: Message):
     try:
@@ -564,9 +619,17 @@ def main():
         print(f"Could not determine IP for client {clientName}")
         sys.exit(1)
 
+    # Guarda IP global para respostas de heartbeat
+    global _client_ip
+    _client_ip = my_ip
+
     # Inicia listener UDP de frames
     t_udp = threading.Thread(target=udp_listener, args=(my_ip,), daemon=True)
     t_udp.start()
+
+    # Inicia listener de heartbeat/controle leve para não derrubar o cliente
+    t_hb = threading.Thread(target=heartbeat_listener, args=(my_ip,), daemon=True)
+    t_hb.start()
 
     streams = get_available_streams(node_host, node_port, clientName)
     if not streams:
