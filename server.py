@@ -116,89 +116,23 @@ def sender(sdb:ServerDataBase):
                 if not vs:
                     continue
 
-                # Tenta ler até 5 frames, mas respeitando limite de tamanho UDP
-                frames_batch = []
-                current_batch_size = 0
-                MAX_PAYLOAD = 60000 # Margem de segurança para 64KB
-
-                # stream_key = "<server>:<stream>"
-                # FIX: Use simple stream_id to match signaling (client requests "stream1", not "S1:stream1")
-                stream_key = stream_id 
-                stream_num = _stream_id_to_int(stream_key)
-                
-                # Loop para coletar frames
-                for _ in range(5):
-                    frame = vs.nextFrame()
-                    if not frame:
-                        break
+                # Tenta ler 1 frame por vez para suavizar o tráfego (evita bursts)
+                frame = vs.nextFrame()
+                if frame:
+                    # stream_key = "<server>:<stream>"
+                    # FIX: Use simple stream_id to match signaling (client requests "stream1", not "S1:stream1")
+                    stream_key = stream_id 
+                    stream_num = _stream_id_to_int(stream_key)
                     
-                    f_len = len(frame)
-                    # Overhead estimado: 4 bytes (len)
-                    if current_batch_size + f_len + 4 > MAX_PAYLOAD:
-                        if frames_batch:
-                            # Batch cheio, envia o que tem
-                            # Pack frames: Count(1B) + [Len(4B) + Frame]*Count
-                            packed_frames = struct.pack("!B", len(frames_batch))
-                            for f in frames_batch:
-                                packed_frames += struct.pack("!I", len(f)) + f
-
-                            payload = stream_key.encode('utf-8') + b'\0' + packed_frames
-                            
-                            # O primeiro frame deste batch é:
-                            # vs.frameNbr() (que é o do frame atual que NÃO entrou) - len(frames_batch)
-                            # Não, vs.frameNbr() aponta para o frame recém lido (que sobrou).
-                            # Então os frames no batch são: (vs.frameNbr()-1), (vs.frameNbr()-2)...
-                            # O primeiro é vs.frameNbr() - len(frames_batch)
-                            # Ex: li 10, 11. Li 12 (estourou). Batch=[10,11]. frameNbr=12.
-                            # Primeiro do batch = 12 - 1 - 2 + 1? Não.
-                            # Batch tem 2 frames. O ultimo do batch foi 11.
-                            # O frame atual é 12.
-                            # Então o primeiro do batch é 11 - 2 + 1 = 10.
-                            # Ou seja: (vs.frameNbr() - 1) - len(frames_batch) + 1
-                            first_frame_num = (vs.frameNbr() - 1) - len(frames_batch) + 1
-
-                            packet_bytes = SimplePacket.encode(
-                                stream_id=stream_num,
-                                frame_num=first_frame_num,
-                                timestamp=time.time(),
-                                frame_data=payload
-                            )
-
-                            for vizinho in viz:
-                                try:
-                                    sckt.sendto(packet_bytes, (vizinho, SENDER_PORT))
-                                except Exception as e:
-                                    print(f"Error sending partial batch for {stream_key} to {vizinho}: {e}")
-                            
-                            # Reseta batch e adiciona o frame atual
-                            frames_batch = [frame]
-                            current_batch_size = f_len + 4
-                        else:
-                            # O frame sozinho já é maior que MAX_PAYLOAD.
-                            # Temos que enviar assim mesmo (vai falhar se > 65k, mas tentamos)
-                            frames_batch.append(frame)
-                            current_batch_size += f_len + 4
-                            # Força envio no final do loop ou próxima iteração
-                    else:
-                        frames_batch.append(frame)
-                        current_batch_size += f_len + 4
-
-                # Envia o que sobrou no batch (ou tudo se não estourou)
-                if frames_batch:
-                    packed_frames = struct.pack("!B", len(frames_batch))
-                    for f in frames_batch:
-                        packed_frames += struct.pack("!I", len(f)) + f
+                    # Formato Batch de 1 frame para compatibilidade: Count(1B) + Len(4B) + Frame
+                    # Isso mantém a compatibilidade com o cliente que espera um batch
+                    packed_frames = struct.pack("!B", 1) + struct.pack("!I", len(frame)) + frame
 
                     payload = stream_key.encode('utf-8') + b'\0' + packed_frames
                     
-                    # Aqui o vs.frameNbr() é o último frame lido, que ESTÁ no batch.
-                    # Ex: li 10, 11, 12. Batch=[10,11,12]. frameNbr=12.
-                    # Primeiro = 12 - 3 + 1 = 10.
-                    first_frame_num = vs.frameNbr() - len(frames_batch) + 1
-
                     packet_bytes = SimplePacket.encode(
                         stream_id=stream_num,
-                        frame_num=first_frame_num,
+                        frame_num=vs.frameNbr(),
                         timestamp=time.time(),
                         frame_data=payload
                     )
@@ -207,15 +141,10 @@ def sender(sdb:ServerDataBase):
                         try:
                             sckt.sendto(packet_bytes, (vizinho, SENDER_PORT))
                         except Exception as e:
-                            print(f"Error sending final batch for {stream_key} to {vizinho}: {e}")
+                            print(f"Error sending frame {vs.frameNbr()} for {stream_key} to {vizinho}: {e}")
             
-            # Log periódico para debug
-            # if time.time() % 2 < 0.05:
-            #      print(f"[SERVER][DEBUG] Active streams: {list(streams_active.keys())} Targets: {sdb.get_streams_vizinhos()}")
-
-            # Ajusta o sleep para corresponder aproximadamente à duração dos 5 frames enviados (30fps)
-            # 5 * 0.0333 = 0.166s. Usamos um valor ligeiramente menor para garantir que o buffer do cliente não esvazie.
-            time.sleep(0.03333 * 4)
+            # Ajusta o sleep para manter ~30fps (0.033s por frame)
+            time.sleep(0.033)
         except Exception as e:
             print(f"Error in sender: {e}")
     sckt.close()
