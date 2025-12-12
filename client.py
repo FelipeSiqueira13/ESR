@@ -407,7 +407,7 @@ def _playback_loop(stream_id):
     expected = None
     buffering = True
     MIN_BUFFER = 15        # Começa a tocar só quando tiver 15 frames
-    MAX_WAIT_MISSING = 0.1 # Espera até 100ms por um frame atrasado antes de pular
+    MAX_WAIT_MISSING = 0.01 # Espera até 10ms por um frame atrasado antes de pular
     last_frame_time = time.time()
     
     while _running and not _playback_stop.is_set():
@@ -417,6 +417,10 @@ def _playback_loop(stream_id):
         with _frame_lock:
             buf = _frame_buffer.get(stream_id)
             if buf:
+                # Debug: Print buffer status every 100 iterations or if critical
+                # if len(buf) < 5:
+                #    print(f"[DEBUG] Low buffer: {len(buf)} frames. Expected: {expected}")
+
                 # Inicializa expected se for a primeira vez
                 if expected is None:
                     if len(buf) >= MIN_BUFFER:
@@ -425,6 +429,8 @@ def _playback_loop(stream_id):
                         print(f"[CLIENT] Buffer cheio ({len(buf)} frames). Iniciando playback em {expected}.")
                     else:
                         # Ainda enchendo buffer inicial
+                        if len(buf) % 5 == 0: # Print progress
+                             print(f"[DEBUG] Buffering... {len(buf)}/{MIN_BUFFER}")
                         time.sleep(0.01)
                         continue
                 
@@ -432,8 +438,10 @@ def _playback_loop(stream_id):
                 if buffering:
                     if len(buf) >= MIN_BUFFER:
                         buffering = False
-                        print("[CLIENT] Re-buffering concluído.")
+                        print(f"[CLIENT] Re-buffering concluído. Buffer: {len(buf)}")
                     else:
+                        if len(buf) % 5 == 0:
+                             print(f"[DEBUG] Re-buffering... {len(buf)}/{MIN_BUFFER}")
                         time.sleep(0.01)
                         continue
 
@@ -448,13 +456,15 @@ def _playback_loop(stream_id):
                     if higher:
                         # Temos frames futuros, mas o esperado falta.
                         # Se esperamos pouco tempo, continua esperando (pode estar fora de ordem)
-                        if (current_time - last_frame_time) < MAX_WAIT_MISSING:
+                        wait_time = current_time - last_frame_time
+                        if wait_time < MAX_WAIT_MISSING:
                             # Ainda damos chance para o frame chegar
+                            # print(f"[DEBUG] Waiting for frame {expected}. Waited {wait_time:.3f}s")
                             pass 
                         else:
                             # Timeout de espera: pula para o próximo disponível
                             next_num = min(higher)
-                            print(f"[CLIENT] Frame {expected} perdido/atrasado. Pulando para {next_num}.")
+                            print(f"[CLIENT] Frame {expected} perdido/atrasado (Waited {wait_time:.3f}s). Pulando para {next_num}. Buffer size: {len(buf)}")
                             frame = buf.pop(next_num)
                             expected = next_num + 1
                             last_frame_time = current_time
@@ -462,7 +472,7 @@ def _playback_loop(stream_id):
                         # Não tem esperado nem futuros -> Buffer vazio ou stream parou
                         # Se ficar vazio, entra em modo buffering
                         if len(buf) == 0:
-                            print("[CLIENT] Buffer vazio. Pausando para re-buffer...")
+                            print(f"[CLIENT] Buffer vazio após frame {expected-1}. Pausando para re-buffer...")
                             buffering = True
 
         if frame is None:
@@ -471,6 +481,7 @@ def _playback_loop(stream_id):
             
         shown = _display_frame(frame, window_title)
         if not shown:
+            print(f"[DEBUG] Frame {expected-1} not shown (display error/headless).")
             _update_http_frame(stream_id, frame)
             time.sleep(0.02)
             continue
