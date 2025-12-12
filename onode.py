@@ -795,8 +795,9 @@ def data_listener(db: DataBase):
             # Valida origem esperada (best_parent)
             upstream = db.get_best_parent(stream_id) or db.getStreamSource(stream_id)
             if upstream and upstream != sender_ip:
-                print(f"[ONODE][MM][DROP] unexpected upstream for {stream_id}: got {sender_ip}, expect {upstream}")
-                continue
+                # print(f"[ONODE][MM][DROP] unexpected upstream for {stream_id}: got {sender_ip}, expect {upstream}")
+                # continue
+                pass # Aceita pacote para permitir soft handover
 
             # Decode batch for logging/storage
             try:
