@@ -767,6 +767,8 @@ def data_listener(db: DataBase):
     udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024) # Increase buffer to 1MB
     udp_sock.bind((db.my_ip, SENDER_PORT))
 
+    _last_correction_time = {}
+
     while True:
         try:
             raw, addr = udp_sock.recvfrom(65535)
@@ -795,8 +797,26 @@ def data_listener(db: DataBase):
             # Valida origem esperada (best_parent)
             upstream = db.get_best_parent(stream_id) or db.getStreamSource(stream_id)
             if upstream and upstream != sender_ip:
-                print(f"[ONODE][MM][DROP] unexpected upstream for {stream_id}: got {sender_ip}, expect {upstream}")
-                continue
+                # print(f"[ONODE][MM][DROP] unexpected upstream for {stream_id}: got {sender_ip}, expect {upstream}")
+                
+                # Lógica de correção: se estamos recebendo de quem não é o pai atual,
+                # reforçamos o pedido ao pai correto e mandamos parar o incorreto.
+                now = time.time()
+                last_time = _last_correction_time.get((stream_id, sender_ip), 0)
+                if now - last_time > 1.0: # Rate limit de 1 segundo
+                    _last_correction_time[(stream_id, sender_ip)] = now
+                    # print(f"[ONODE][MM] Correcting route for {stream_id}: stop {sender_ip}, req {upstream}")
+                    
+                    # 1. Manda parar quem está mandando errado (sender_ip)
+                    stop_msg = Message(Message.STREAM_STOP, db.get_my_ip(sender_ip), stream_id)
+                    send_message(stop_msg, sender_ip, RECEIVER_PORT)
+                    
+                    # 2. Manda pedir para quem deveria mandar (upstream)
+                    req_msg = Message(Message.STREAM_REQUEST, db.get_my_ip(upstream), stream_id)
+                    send_message(req_msg, upstream, RECEIVER_PORT)
+
+                # Não fazemos 'continue' -> aceitamos o pacote para soft handover
+                pass
 
             # Decode batch for logging/storage
             try:
