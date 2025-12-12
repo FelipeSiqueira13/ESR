@@ -5,7 +5,7 @@
         ],
         "streams": {
             "stream1": "videos/movie.Mjpeg",
-            "stream3": "videos/CuteGoat.mjpeg"
+            "stream3": "videos/CuteGoat.Mjpeg"
         }
     }
 }
