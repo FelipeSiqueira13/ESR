@@ -28,8 +28,8 @@ _frame_lock = threading.Lock()
 TTL_DEFAULT = 8
 ANNOUNCE_TYPE = Message.VIDEO_METRIC_REQUEST  # reutilizamos como ANNOUNCE
 
-HEARTBEAT_INTERVAL = 500      # segundos
-HEARTBEAT_TIMEOUT  = 1000     # segundos
+HEARTBEAT_INTERVAL = 5      # segundos
+HEARTBEAT_TIMEOUT  = 30     # segundos
 HYST_FACTOR = 0.9           # mesma ideia do DB; opcional sobrescrever
 
 
@@ -420,13 +420,16 @@ def sender(db:DataBase):
             msg, host, port = send_queue.get()
             payload = msg.serialize() + b'\n'
             key = (host, port)
+            is_hb = msg.getType() == Message.ADD_NEIGHBOUR
+            max_retries = 1 if is_hb else MAX_RETRIES
+            timeout_s = 0.5 if is_hb else 5.0
             success = False
 
-            for attempt in range(MAX_RETRIES):
+            for attempt in range(max_retries):
                 sckt = None
                 try:
-                    # tenta usar cache
-                    if key in connection_cache and attempt == 0:
+                    # tenta usar cache apenas para mensagens não-heartbeat
+                    if not is_hb and key in connection_cache and attempt == 0:
                         sckt = connection_cache[key]
                         sckt.sendall(payload)
                         success = True
@@ -434,36 +437,32 @@ def sender(db:DataBase):
 
                     # nova conexão
                     sckt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    sckt.settimeout(5.0)
+                    sckt.settimeout(timeout_s)
                     sckt.connect((host, port))
                     _send_buffer(sckt, payload)
-                    connection_cache[key] = sckt
+                    # cache apenas para mensagens de controle/stream que não sejam heartbeat
+                    if not is_hb:
+                        connection_cache[key] = sckt
                     success = True
                     break
 
                 except Exception as e:
-                    # log_ev("TX_FAIL", type=msg.getType(), host=host, port=port, attempt=attempt+1, err=e)
-                    # limpa cache se estava guardado
                     if key in connection_cache:
                         try:
                             connection_cache[key].close()
                         except:
                             pass
                         connection_cache.pop(key, None)
-                    # fecha socket temporário
                     if sckt:
                         try:
                             sckt.close()
                         except:
                             pass
-                    if attempt < MAX_RETRIES - 1:
+                    if attempt < max_retries - 1:
                         time.sleep(0.2)
                         continue
-                # fim try/except
-            # fim for
-
             if not success:
-                log_ev("TX_DROP", type=msg.getType(), host=host, port=port, retries=MAX_RETRIES)
+                log_ev("TX_DROP", type=msg.getType(), host=host, port=port, retries=max_retries)
 
         except Exception as e:
             log_ev("SENDER_ERR", err=e)
