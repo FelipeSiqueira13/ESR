@@ -61,7 +61,7 @@ def _detect_ffplay():
 def _start_ffplay(window_title):
     global _ffplay_process
     if not _detect_ffplay():
-        print("ffplay not found.")
+        # print("ffplay not found.")
         return False
     
     try:
@@ -72,12 +72,29 @@ def _start_ffplay(window_title):
         # -window_title: set title
         # -fflags nobuffer: reduce latency
         # -flags low_delay: reduce latency
-        cmd = ["ffplay", "-f", "mjpeg", "-i", "-", "-an", "-sn", "-window_title", window_title, "-framedrop", "-fflags", "nobuffer", "-flags", "low_delay", "-loglevel", "quiet"]
-        _ffplay_process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        print(f"[CLIENT] ffplay started for {window_title}")
+        # -infbuf: infinite buffer (prevents dropping if reading is slow, but we want low latency?)
+        # Actually for real-time, -infbuf helps prevent "buffer underflow" crashes in some versions,
+        # but increases latency. Let's try without first, but add -probesize 32 -sync ext
+        cmd = [
+            "ffplay", 
+            "-f", "mjpeg", 
+            "-an", "-sn", 
+            "-window_title", window_title, 
+            "-framedrop", 
+            "-fflags", "nobuffer", 
+            "-flags", "low_delay", 
+            "-probesize", "32", 
+            "-sync", "ext", 
+            "-loglevel", "error", 
+            "-i", "-"
+        ]
+        # Use DEVNULL for stdout/stderr to keep terminal clean, unless debugging
+        _ffplay_process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # print(f"[CLIENT] ffplay started for {window_title}")
         return True
     except Exception as e:
         print(f"Error starting ffplay: {e}")
+        return False
         return False
 
 def _stop_ffplay():
@@ -288,6 +305,10 @@ def udp_listener(bind_ip):
 def _display_frame(frame_data, window_title):
     global _display_warned, _ffplay_process
     
+    # Auto-restart ffplay if it crashed or was closed
+    if _ffplay_process is None and _detect_ffplay():
+        _start_ffplay(window_title)
+
     # 1. Tenta usar ffplay se estiver ativo
     if _ffplay_process:
         try:
@@ -295,9 +316,10 @@ def _display_frame(frame_data, window_title):
             _ffplay_process.stdin.flush()
             return True
         except (BrokenPipeError, OSError):
-            print("[CLIENT] ffplay closed/crashed.")
+            # print("[CLIENT] ffplay closed/crashed.")
             _stop_ffplay()
-            # Fallback to CV2 if available
+            # Fallback to CV2 if available immediately?
+            # Let's just return False so loop continues and tries to restart next time
     
     # 2. Fallback para OpenCV
     if not _GUI_AVAILABLE:
@@ -383,30 +405,78 @@ def _playback_loop(stream_id):
         _start_ffplay(window_title)
     
     expected = None
+    buffering = True
+    MIN_BUFFER = 15        # Começa a tocar só quando tiver 15 frames
+    MAX_WAIT_MISSING = 0.1 # Espera até 100ms por um frame atrasado antes de pular
+    last_frame_time = time.time()
+    
     while _running and not _playback_stop.is_set():
         frame = None
+        current_time = time.time()
+
         with _frame_lock:
             buf = _frame_buffer.get(stream_id)
             if buf:
+                # Inicializa expected se for a primeira vez
                 if expected is None:
-                    expected = min(buf.keys())
+                    if len(buf) >= MIN_BUFFER:
+                        expected = min(buf.keys())
+                        buffering = False
+                        print(f"[CLIENT] Buffer cheio ({len(buf)} frames). Iniciando playback em {expected}.")
+                    else:
+                        # Ainda enchendo buffer inicial
+                        time.sleep(0.01)
+                        continue
+                
+                # Se estamos em estado de buffering (re-buffer por falta de dados)
+                if buffering:
+                    if len(buf) >= MIN_BUFFER:
+                        buffering = False
+                        print("[CLIENT] Re-buffering concluído.")
+                    else:
+                        time.sleep(0.01)
+                        continue
+
+                # Tenta pegar o frame esperado
                 if expected in buf:
                     frame = buf.pop(expected)
                     expected += 1
+                    last_frame_time = current_time
                 else:
-                    higher = [n for n in buf.keys() if n > (expected or 0)]
+                    # Frame esperado não está. Verifica se tem futuros.
+                    higher = [n for n in buf.keys() if n > expected]
                     if higher:
-                        next_num = min(higher)
-                        frame = buf.pop(next_num)
-                        expected = next_num + 1
+                        # Temos frames futuros, mas o esperado falta.
+                        # Se esperamos pouco tempo, continua esperando (pode estar fora de ordem)
+                        if (current_time - last_frame_time) < MAX_WAIT_MISSING:
+                            # Ainda damos chance para o frame chegar
+                            pass 
+                        else:
+                            # Timeout de espera: pula para o próximo disponível
+                            next_num = min(higher)
+                            print(f"[CLIENT] Frame {expected} perdido/atrasado. Pulando para {next_num}.")
+                            frame = buf.pop(next_num)
+                            expected = next_num + 1
+                            last_frame_time = current_time
+                    else:
+                        # Não tem esperado nem futuros -> Buffer vazio ou stream parou
+                        # Se ficar vazio, entra em modo buffering
+                        if len(buf) == 0:
+                            print("[CLIENT] Buffer vazio. Pausando para re-buffer...")
+                            buffering = True
+
         if frame is None:
-            time.sleep(0.01)
+            time.sleep(0.005) # Dorme pouco para checar buffer rápido
             continue
+            
         shown = _display_frame(frame, window_title)
         if not shown:
             _update_http_frame(stream_id, frame)
             time.sleep(0.02)
             continue
+        
+        # Controle de FPS simples (opcional, pois o ffplay já controla, mas ajuda a não drenar buffer instantaneamente)
+        # time.sleep(0.025) 
 
     _stop_ffplay()
     if cv2 is not None:
