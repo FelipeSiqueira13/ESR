@@ -416,7 +416,7 @@ def _playback_loop(stream_id):
 
         with _frame_lock:
             buf = _frame_buffer.get(stream_id)
-            if buf:
+            if buf is not None:
                 # Debug: Print buffer status every 100 iterations or if critical
                 # if len(buf) < 5:
                 #    print(f"[DEBUG] Low buffer: {len(buf)} frames. Expected: {expected}")
