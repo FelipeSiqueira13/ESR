@@ -224,10 +224,15 @@ def udp_listener(bind_ip):
     _udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024) # Increase buffer to 1MB
     _udp_sock.bind((bind_ip, SENDER_PORT))
     # print(f"[CLIENT][UDP] listening on {bind_ip}:{SENDER_PORT}")
-
+    
+    packets_received = 0
     while _running:
         try:
             raw, addr = _udp_sock.recvfrom(65535)
+            packets_received += 1
+            if packets_received % 100 == 0:
+                print(f"[CLIENT][UDP] Total packets received: {packets_received}")
+
             if not _running: break
             try:
                 pkt = SimplePacket.decode(raw)
