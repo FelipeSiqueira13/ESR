@@ -94,8 +94,14 @@ def sender(sdb:ServerDataBase):
     sckt = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     streams_active = {}
+    
+    # Controle de tempo para cada stream: stream_id -> next_frame_time
+    stream_next_time = {}
+    
     while True:
-        loop_start = time.time()
+        now = time.time()
+        loop_start = now
+        
         try:
             with sdb.lock:
                 stream_viz_copy = dict(sdb.stream_vizinhos)
@@ -106,6 +112,7 @@ def sender(sdb:ServerDataBase):
                     if path:
                         try:
                             streams_active[stream_id] = VideoStream(path)
+                            stream_next_time[stream_id] = now
                         except Exception as e:
                             print(f"Error loading VideoStream for {stream_id}: {e}")
                             continue
@@ -114,9 +121,19 @@ def sender(sdb:ServerDataBase):
                 if not vs:
                     continue
 
-                vs = streams_active.get(stream_id)
-                if not vs:
+                # Verifica se é hora de mandar o próximo frame desta stream
+                target_time = stream_next_time.get(stream_id, now)
+                
+                # Se estamos adiantados (target_time > now), não manda nada ainda
+                if target_time > now:
                     continue
+                
+                # Se estamos muito atrasados (> 0.5s), reseta o clock para evitar burst
+                if now - target_time > 0.5:
+                    target_time = now
+                
+                # Atualiza o tempo alvo para o próximo frame
+                stream_next_time[stream_id] = target_time + (1.0 / FPS)
 
                 # Tenta ler 1 frame por vez para suavizar o tráfego (evita bursts)
                 frame = vs.nextFrame()
@@ -145,8 +162,9 @@ def sender(sdb:ServerDataBase):
                         except Exception as e:
                             print(f"Error sending frame {vs.frameNbr()} for {stream_key} to {vizinho}: {e}")
             
-            elapsed = time.time() - loop_start
-            time.sleep(max(0, (1/FPS) - elapsed))
+            # Sleep curto para não queimar CPU, mas responsivo
+            time.sleep(0.001)
+
         except Exception as e:
             print(f"Error in sender: {e}")
     sckt.close()
