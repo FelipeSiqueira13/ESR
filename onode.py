@@ -200,8 +200,8 @@ def metric_request_handler(msg: Message, db: DataBase):
     # Vamos assumir que o delay do link já foi medido ou será inferido pela diferença de tempo?
     
     # Se usarmos relógios sincronizados (simulação), (now - start_time) é o delay total absoluto.
-    # total_delay_absolute = (dt.datetime.now() - start_time).total_seconds() * 1000
-    total_delay = accumulated_delay + hop_penalty - cache_bonus
+    total_delay_absolute = (dt.datetime.now() - start_time).total_seconds() * 1000
+    total_delay = total_delay_absolute + hop_penalty - cache_bonus
     
     log_ev("METRIC_REQ_RECV", 
            req=request_id,
