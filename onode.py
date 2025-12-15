@@ -33,7 +33,7 @@ HEARTBEAT_TIMEOUT  = 3      # segundos (reduzido para detecção mais rápida de
 HYST_FACTOR = 0.8           
 
 HOP_PENALTY_PERCENT = 0.10
-CACHE_BONUS_PERCENT = 0.15   
+CACHE_BONUS_PERCENT = 0.3   
 
 
 def log_ev(tag: str, **fields):
@@ -168,6 +168,11 @@ def _is_stream_active_locally(stream_id: str, db: DataBase) -> bool:
     if db.has_downstream(stream_id):
         return True
 
+    with db.lock:
+        for viz in db.vizinhos:
+            if db.active_streams_table.get(viz, {}).get(stream_id) == 1:
+                return True
+
     with _stream_last_seen_lock:
         last_seen = _stream_last_seen.get(stream_id, 0)
         if time.time() - last_seen < 2.0:
@@ -221,7 +226,7 @@ def metric_request_handler(msg: Message, db: DataBase):
                stream=stream,
                delay_before=incoming_delay,
                delay_after=total_delay,
-               has_cache=_is_stream_active_locally(stream, db),
+               local_cache=_is_stream_active_locally(stream, db),
                from_=sender)
     
     # Armazena requisição
