@@ -32,6 +32,9 @@ HEARTBEAT_INTERVAL = 1      # segundos
 HEARTBEAT_TIMEOUT  = 3      # segundos (reduzido para detecção mais rápida de falhas)
 HYST_FACTOR = 0.9           # mesma ideia do DB; opcional sobrescrever
 
+HOP_PENALTY_MS = 1.0    # penalidade fixa por hop (ms)
+CACHE_BONUS_MS = 1.0     # bônus por stream em cache (ms)
+
 
 def log_ev(tag: str, **fields):
     parts = [f"[{tag}]"] + [f"{k}={v}" for k, v in fields.items()]
@@ -147,6 +150,17 @@ def wake_router_handler(vizinhos, db:DataBase):
 def update_metrics(streams_id:list, metric, db:DataBase, viz):
     db.AtualizaMetricas(viz, streams_id, metric)
 
+def _is_stream_active_locally(stream_id: str, db: DataBase) -> bool:
+    if db.has_downstream(stream_id):
+        return True
+
+    with _stream_last_seen_lock:
+        last_seen = _stream_last_seen.get(stream_id, 0)
+        if time.time() - last_seen < 2.0:
+            return True
+    
+    return False
+
 
 def metric_request_handler(msg: Message, db: DataBase):
     try:
@@ -162,8 +176,18 @@ def metric_request_handler(msg: Message, db: DataBase):
     streams = payload.get("streams", [])
     accumulated_delay = float(payload.get("accumulated_delay_ms", 0))
     
+    
     if not request_id or not start_time:
         return
+
+    hop_penalty = HOP_PENALTY_MS
+
+    cache_bonus = 0.0
+    active_streams = []
+    for stream in streams:
+        if _is_stream_active_locally(stream, db):
+            cache_bonus += CACHE_BONUS_MS
+            active_streams.append(stream)
 
     # Calcula delay acumulado até aqui (Server -> ... -> Eu)
     # O start_time é absoluto do servidor.
@@ -176,9 +200,14 @@ def metric_request_handler(msg: Message, db: DataBase):
     # Vamos assumir que o delay do link já foi medido ou será inferido pela diferença de tempo?
     
     # Se usarmos relógios sincronizados (simulação), (now - start_time) é o delay total absoluto.
-    total_delay_absolute = (dt.datetime.now() - start_time).total_seconds() * 1000
+    # total_delay_absolute = (dt.datetime.now() - start_time).total_seconds() * 1000
+    total_delay = accumulated_delay + hop_penalty - cache_bonus
     
-    log_ev("METRIC_REQ_RECV", req=request_id, streams=streams, delay=total_delay_absolute, from_=msg.getSrc())
+    log_ev("METRIC_REQ_RECV", 
+           req=request_id,
+           streams=streams,
+           delay=total_delay,
+           from_=msg.getSrc())
     
     # Armazena requisição para processar a resposta depois (se houver)
     db.store_metric_request(request_id, {
@@ -198,7 +227,7 @@ def metric_request_handler(msg: Message, db: DataBase):
         current_upstream = _upstream_for(stream, db)
 
         # Só propagamos se a métrica for útil (melhor caminho ou atualização do pai atual)
-        if db.update_announce(stream, total_delay_absolute, msg.getSrc()):
+        if db.update_announce(stream, total_delay, msg.getSrc()):
             should_propagate = True
             _check_and_switch_parent(stream, current_upstream, db)
 
@@ -220,10 +249,10 @@ def metric_request_handler(msg: Message, db: DataBase):
                 streams,
                 request_id=request_id,
                 start_time=start_time,
-                accumulated_delay_ms=total_delay_absolute
+                accumulated_delay_ms=total_delay
             )
             send_message(fwd_msg, neighbor, ROUTERS_RECEIVER_PORT)
-            log_ev("METRIC_REQ_FWD", req=request_id, to=neighbor, delay=total_delay_absolute)
+            log_ev("METRIC_REQ_FWD", req=request_id, to=neighbor, delay=total_delay)
     else:
         log_ev("METRIC_REQ_LEAF", req=request_id, msg="No other neighbors to forward")
 
@@ -250,7 +279,16 @@ def metric_response_handler(msg: Message, db: DataBase):
     
     # RTT local até quem enviou a resposta
     local_rtt_ms = measure_rtt(msg.getSrc())
-    total_delay_ms = incoming_delay + local_rtt_ms
+    hop_penalty = HOP_PENALTY_MS
+
+    cache_bonus = 0.0
+    active_streams = []
+    for stream in streams:
+        if _is_stream_active_locally(stream, db):
+            cache_bonus += CACHE_BONUS_MS
+            active_streams.append(stream)
+
+    total_delay_ms = incoming_delay + local_rtt_ms + hop_penalty - cache_bonus
 
     log_ev("METRIC_RESP_RECV", req=request_id, streams=streams, cost=total_delay_ms, parent=msg.getSrc(), from_=msg.getSrc(), incoming_ms=incoming_delay, rtt_ms=local_rtt_ms, total_ms=total_delay_ms)
 
@@ -310,8 +348,19 @@ def metric_update_handler(msg: Message, db: DataBase):
         print("[ONODE][METRIC_UPDATE] Missing streams")
         return
     
+    hop_penalty = HOP_PENALTY_MS
+
+    cache_bonus = 0.0
+    active_streams = []
+    for stream in streams:
+        if _is_stream_active_locally(stream, db):
+            cache_bonus += CACHE_BONUS_MS
+            active_streams.append(stream)
+    
+    adjusted_delay = accumulated_delay + hop_penalty - cache_bonus
+
     # Atualiza métricas locais com o delay acumulado
-    db.AtualizaMetricas(msg.getSrc(), streams, accumulated_delay)
+    db.AtualizaMetricas(msg.getSrc(), streams, adjusted_delay)
     log_ev("METRIC_UPDATE_RECV", req=request_id, streams=streams, cost=accumulated_delay, parent=msg.getSrc(), delay_ms=accumulated_delay, from_=msg.getSrc())
     
     # Atualiza tabela de roteamento e verifica switch
@@ -332,10 +381,10 @@ def metric_update_handler(msg: Message, db: DataBase):
                 streams,
                 request_id=request_id,
                 start_time=stored.get("start_time"),
-                accumulated_delay_ms=accumulated_delay
+                accumulated_delay_ms=adjusted_delay
             )
             send_message(update_msg, downstream, ROUTERS_RECEIVER_PORT)
-            log_ev("METRIC_UPDATE_FWD", req=request_id, streams=streams, cost=accumulated_delay, parent=msg.getSrc(), delay_ms=accumulated_delay, to=downstream, from_=msg.getSrc())
+            log_ev("METRIC_UPDATE_FWD", req=request_id, streams=streams, cost=adjusted_delay, parent=msg.getSrc(), delay_ms=accumulated_delay, to=downstream, from_=msg.getSrc())
         
         # Remove requisição processada
         db.remove_metric_request(request_id)
@@ -356,10 +405,10 @@ def metric_update_handler(msg: Message, db: DataBase):
                     streams,
                     request_id=request_id or f"fwd-{int(dt.datetime.now().timestamp()*1000)}",
                     start_time=dt.datetime.now(),
-                    accumulated_delay_ms=accumulated_delay
+                    accumulated_delay_ms=adjusted_delay
                 )
                 send_message(update_msg, downstream, ROUTERS_RECEIVER_PORT)
-                log_ev("METRIC_UPDATE_BCAST", req=request_id, streams=streams, cost=accumulated_delay, parent=msg.getSrc(), delay_ms=accumulated_delay, to=downstream, from_=msg.getSrc())
+                log_ev("METRIC_UPDATE_BCAST", req=request_id, streams=streams, cost=adjusted_delay, parent=msg.getSrc(), delay_ms=accumulated_delay, to=downstream, from_=msg.getSrc())
 
 
 # =============================================================
