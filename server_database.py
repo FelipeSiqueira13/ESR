@@ -43,7 +43,7 @@ class ServerDataBase():
 
         # Inicializa estado para cada interface local e cada vizinho configurado
         for ip, neighs in ip_data.items():
-            self.server_vizinhos[ip] = 0  # minha(s) interfaces
+            self.server_vizinhos[ip] = 0  # minhas interfaces desligadas
             self.neighbor_last_seen[ip] = None
             for viz in (neighs if isinstance(neighs, list) else [neighs]):
                 self.server_vizinhos[viz] = 0
@@ -79,23 +79,23 @@ class ServerDataBase():
     def initiate_stream(self,src,stream_id):
         with self.lock:
             """Adiciona o stream_id ao dicionario de streams_vizinhos"""
-            print(f"[SDB] initiate_stream called for src={src} stream={stream_id}")
+            print(f"initiate_stream called for src={src} stream={stream_id}")
             if stream_id not in self.stream_vizinhos:
                 self.stream_vizinhos[stream_id] = []
             if src not in self.stream_vizinhos[stream_id]:
                 self.stream_vizinhos[stream_id].append(src)
-                print(f"[SDB] Added {src} to stream {stream_id}. Current list: {self.stream_vizinhos[stream_id]}")
+                print(f"Added {src} to stream {stream_id}. Current list: {self.stream_vizinhos[stream_id]}")
             else:
-                print(f"[SDB] {src} already in stream {stream_id}")
+                print(f"{src} already in stream {stream_id}")
     
     def end_stream(self,src,stream_id):
         with self.lock:
             """Remove o stream_id do dicionario de streams_vizinhos"""
-            print(f"[SDB] end_stream called for src={src} stream={stream_id}")
+            print(f"end_stream called for src={src} stream={stream_id}")
             if stream_id in self.stream_vizinhos:
                 if src in self.stream_vizinhos[stream_id]:
                     self.stream_vizinhos[stream_id].remove(src)
-                    print(f"[SDB] Removed {src} from stream {stream_id}")
+                    print(f"Removed {src} from stream {stream_id}")
                     if not self.stream_vizinhos[stream_id]:
                         del self.stream_vizinhos[stream_id]
     

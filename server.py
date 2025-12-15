@@ -16,9 +16,9 @@ RECEIVER_PORT = 40331
 SENDER_PORT = 40332
 ROUTERS_RECEIVER_PORT = 40333
 ROUTERS_SENDER_PORT = 40334
-METRIC_INTERVAL_SECONDS = 5
+METRIC_INTERVAL_SECONDS = 3
 HEARTBEAT_INTERVAL = 1
-HEARTBEAT_TIMEOUT = 15
+HEARTBEAT_TIMEOUT = 5
 FPS = 30
 
 def _send_buffer(sock: socket.socket, payload: bytes):
@@ -34,7 +34,7 @@ def stream_request_handler(msg, database: ServerDataBase):
     src = msg.getSrc()
     stream_id = msg.getData()
     database.initiate_stream(src, stream_id)
-    print(f"[SERVER][STREAM_REQUEST] src={src} stream_id={stream_id}")
+    print(f"SENDING STREAM src={src} stream_id={stream_id}")
 
 def stream_stop_handler(msg, database: ServerDataBase):
     src = msg.getSrc()
@@ -66,7 +66,7 @@ def listener(sdb:ServerDataBase):
                             if dados:
                                 msg = Message.deserialize(dados)
                                 typeOfMsg = msg.getType()
-                                print(f"[SERVER][LISTENER] from={addr[0]} type={typeOfMsg} data={msg.getData()}")
+                                print(f"from={addr[0]} type={typeOfMsg} data={msg.getData()}")
 
                                 # qualquer mensagem toca o vizinho
                                 sdb.touch_neighbor(addr[0])
@@ -197,7 +197,7 @@ def cntrl(sdb:ServerDataBase):
                                 # marca último contacto
                                 sdb.touch_neighbor(msgr_ip)
                                 if typeOfMsg == Message.ADD_NEIGHBOUR:
-                                    print(f"[SERVER][CNTRL] ADD_NEIGHBOUR from {msgr_ip}")
+                                    print(f"ADD_NEIGHBOUR from {msgr_ip}")
                                     sdb.inicializaVizinho(msgr_ip)
                                     msg_resp = Message(Message.RESP_NEIGHBOUR, sdb.get_my_ip(msgr_ip), "")
                                     _send_buffer(conn, msg_resp.serialize() + b'\n')
@@ -209,7 +209,7 @@ def cntrl(sdb:ServerDataBase):
                                 elif typeOfMsg == Message.VIDEO_METRIC_UPDATE:
                                     try:
                                         payload = json.loads(msg.getData() or "{}")
-                                        print(f"[SERVER][CNTRL] VIDEO_METRIC_UPDATE from {msgr_ip}: {payload}")
+                                        print(f"VIDEO_METRIC_UPDATE from {msgr_ip}: {payload}")
                                     except json.JSONDecodeError:
                                         print("Invalid VIDEO_METRIC_UPDATE payload received.")
                                         continue
@@ -231,7 +231,7 @@ def cntrl(sdb:ServerDataBase):
 
 def send_control_message(host, message: Message):
     try:
-        print(f"[SERVER][CTRL_SEND] -> {host} type={message.getType()} data={message.getData()}")
+        #print(f"SEND -> {host} type={message.getType()} data={message.getData()}")
         with socket.create_connection((host, ROUTERS_RECEIVER_PORT), timeout=5) as ctrl:
             _send_buffer(ctrl, message.serialize() + b'\n')
     except Exception as e:
@@ -270,7 +270,7 @@ def heartbeat_check(sdb: ServerDataBase):
                 neighbors = list(sdb.server_vizinhos.keys())
             for viz in neighbors:
                 if not sdb.is_neighbor_alive(viz, HEARTBEAT_TIMEOUT):
-                    print(f"[SERVER][HB_DOWN] viz={viz}")
+                    #print(f"viz={viz}")
                     sdb.mark_neighbor_down(viz)
         except Exception as e:
             pass
@@ -287,7 +287,7 @@ def metric_updater(sdb:ServerDataBase):
                 start_time = dt.datetime.now()
                 request_id = f"req-{uuid.uuid4().hex[:10]}"
                 sdb.register_metric_request(request_id, viz, streams, start_time)
-                print(f"[SERVER][METRIC_REQ] to={viz} streams={streams} request_id={request_id}")
+                print(f"METRIC_UPDATE to={viz} streams={streams} request_id={request_id}")
                 msg = Message(Message.VIDEO_METRIC_REQUEST, sdb.get_my_ip(viz))
                 msg.metrics_encode(streams, request_id=request_id, start_time=start_time)
                 send_control_message(viz, msg)

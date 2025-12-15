@@ -19,11 +19,9 @@ def convert_to_custom_mjpeg(input_video_path, output_mjpeg_path):
             if not ret:
                 break
             
-            # Redimensionar se necessário (opcional, para deixar mais leve)
+            # tamanho pequeno e a 25% pra funcionar
             frame = cv2.resize(frame, (3*480//4, 3*360//4))
 
-            # Codifica o frame atual para formato JPEG
-            # O segundo parâmetro [int(cv2.IMWRITE_JPEG_QUALITY), 50] define a qualidade (0-100)
             ret, jpeg_data = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 25])
             
             if not ret:
@@ -32,9 +30,6 @@ def convert_to_custom_mjpeg(input_video_path, output_mjpeg_path):
             data_bytes = jpeg_data.tobytes()
             size = len(data_bytes)
             
-            # Cria o cabeçalho de 5 bytes (ex: 12345 -> "12345", 500 -> "00500")
-            # Se o frame for maior que 99999 bytes, isso vai quebrar o formato original,
-            # mas para vídeos leves (360p/480p) geralmente funciona bem.
             if size > 99999:
                 print(f"Aviso: Frame {frame_count} excedeu 99999 bytes ({size}). O formato pode quebrar.")
             
@@ -53,7 +48,7 @@ def convert_to_custom_mjpeg(input_video_path, output_mjpeg_path):
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
+        print("erro, numero insuficiente de argumentos.")
         print("Uso: python video_converter.py <video_entrada.mp4> <video_saida.Mjpeg>")
-        print("Exemplo: python video_converter.py meu_video.mp4 videos/meu_filme.Mjpeg")
     else:
         convert_to_custom_mjpeg(sys.argv[1], sys.argv[2])
