@@ -153,8 +153,7 @@ def sender(sdb:ServerDataBase):
                         except Exception as e:
                             print(f"Error sending frame {vs.frameNbr()} for {stream_key} to {vizinho}: {e}")
             
-            # Sleep curto para não queimar CPU, mas responsivo
-            time.sleep(0.001)
+            time.sleep(1/30)
 
         except Exception as e:
             print(f"Error in sender: {e}")
