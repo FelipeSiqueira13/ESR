@@ -278,7 +278,19 @@ def metric_updater(sdb:ServerDataBase):
     while True:
         try:
             awake_neighbors = sdb.get_awake_neighbors()
-            for viz in awake_neighbors:
+            
+            # NOVO: Filtra apenas vizinhos vivos
+            alive_neighbors = [
+                viz for viz in awake_neighbors 
+                if sdb.is_neighbor_alive(viz, HEARTBEAT_TIMEOUT)
+            ]
+            
+            if not alive_neighbors:
+                print("[SERVER][METRICS] No alive neighbors to send metrics")
+                time.sleep(METRIC_INTERVAL_SECONDS)
+                continue
+            
+            for viz in alive_neighbors:
                 streams = sdb.get_streams()
                 request_id = f"req-{uuid.uuid4().hex[:10]}"
                 sdb.register_metric_request(request_id, viz, streams)
@@ -287,7 +299,6 @@ def metric_updater(sdb:ServerDataBase):
                 
                 print(f"METRIC_UPDATE to={viz} streams={streams} request_id={request_id} rtt={rtt:.2f}ms")
                 msg = Message(Message.VIDEO_METRIC_REQUEST, sdb.get_my_ip(viz))
-                # Inclui o RTT como delay inicial acumulado
                 msg.metrics_encode(streams, request_id=request_id, accumulated_delay_ms=rtt)
                 send_control_message(viz, msg)
         except Exception as e:

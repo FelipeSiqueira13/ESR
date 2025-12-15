@@ -279,6 +279,100 @@ def metric_request_handler(msg: Message, db: DataBase):
     else:
         log_ev("METRIC_REQ_LEAF", req=request_id, msg="No neighbors or no improved streams")
 
+def metric_request_handler(msg: Message, db: DataBase):
+    try:
+        payload = msg.metrics_decode()
+    except Exception as e:
+        print(f"[ONODE][METRIC_REQ] Error decoding metrics: {e}")
+        import traceback
+        traceback.print_exc()
+        return
+
+    request_id = payload.get("request_id")
+    streams = payload.get("streams", [])
+    accumulated_delays = payload.get("accumulated_delays", {})
+    
+    if not isinstance(accumulated_delays, dict):
+        if isinstance(accumulated_delays, (int, float)):
+            accumulated_delays = {s: float(accumulated_delays) for s in streams}
+        else:
+            accumulated_delays = {s: 0.0 for s in streams}
+    
+    if not request_id:
+        return
+
+    sender = msg.getSrc()
+    
+    stream_costs = {}
+    
+    for stream in streams:
+        incoming_delay = float(accumulated_delays.get(stream, 0))
+        total_delay = _apply_delay_adjustments(incoming_delay, stream, db)
+        stream_costs[stream] = total_delay
+        
+        log_ev("METRIC_REQ_RECV", 
+               req=request_id,
+               stream=stream,
+               delay_before=incoming_delay,
+               delay_after=total_delay,
+               has_cache=_is_stream_active_locally(stream, db),
+               from_=sender)
+    
+    db.store_metric_request(request_id, {
+        "streams": streams,
+        "src": sender
+    })
+
+    should_propagate = False
+    streams_to_propagate = []
+    
+    for stream in streams:
+        if stream not in db.available_streams:
+            db.addStream(stream, sender)
+        
+        current_upstream = _upstream_for(stream, db)
+        cost = stream_costs[stream]
+        
+        if db.update_announce(stream, cost, sender):
+            should_propagate = True
+            streams_to_propagate.append(stream)
+            _check_and_switch_parent(stream, current_upstream, db)
+
+    if not should_propagate:
+        log_ev("METRIC_REQ_DROP", req=request_id, msg="Worse paths, not propagating")
+        return
+
+    neighbors = db.get_vizinhos()
+    
+    # NOVO: Filtra apenas vizinhos vivos (excluindo sender)
+    targets = [
+        n for n in neighbors 
+        if n != sender and db.is_neighbor_alive(n, HEARTBEAT_TIMEOUT)
+    ]
+    
+    if not targets:
+        log_ev("METRIC_REQ_NO_ALIVE", req=request_id, msg="No alive neighbors to propagate")
+        return
+    
+    if streams_to_propagate:
+        for neighbor in targets:
+            rtt = measure_rtt(neighbor)
+            
+            new_accumulated_delays = {}
+            for stream in streams_to_propagate:
+                new_accumulated_delays[stream] = stream_costs[stream] + rtt
+            
+            fwd_msg = Message(Message.VIDEO_METRIC_REQUEST, db.get_my_ip(neighbor))
+            fwd_msg.metrics_encode_per_stream(
+                streams_to_propagate,
+                request_id=request_id,
+                accumulated_delays=new_accumulated_delays
+            )
+            send_message(fwd_msg, neighbor, ROUTERS_RECEIVER_PORT)
+            log_ev("METRIC_REQ_FWD", req=request_id, to=neighbor, streams=streams_to_propagate, rtt=rtt)
+    else:
+        log_ev("METRIC_REQ_LEAF", req=request_id, msg="No neighbors or no improved streams")
+
 
 def metric_response_handler(msg: Message, db: DataBase):
     try:
@@ -295,7 +389,6 @@ def metric_response_handler(msg: Message, db: DataBase):
     accumulated_delays = payload.get("accumulated_delays", {})
     streams = payload.get("streams", [])
     
-    # Validação de segurança
     if not isinstance(accumulated_delays, dict):
         if isinstance(accumulated_delays, (int, float)):
             accumulated_delays = {s: float(accumulated_delays) for s in streams}
@@ -308,7 +401,6 @@ def metric_response_handler(msg: Message, db: DataBase):
     
     local_rtt_ms = measure_rtt(msg.getSrc())
     
-    # Processa cada stream individualmente
     stream_costs = {}
     
     for stream in streams:
@@ -327,7 +419,6 @@ def metric_response_handler(msg: Message, db: DataBase):
                rtt_ms=local_rtt_ms,
                has_cache=_is_stream_active_locally(stream, db))
 
-    # Atualiza métricas por stream
     for stream in streams:
         db.AtualizaMetricas(msg.getSrc(), [stream], stream_costs[stream])
         current_upstream = _upstream_for(stream, db)
@@ -350,8 +441,14 @@ def metric_response_handler(msg: Message, db: DataBase):
                 if active_streams.get(stream) == 1 and viz != msg.getSrc():
                     downstream_neighbors.add(viz)
 
-    if downstream_neighbors:
-        for downstream in downstream_neighbors:
+    # NOVO: Filtra apenas vizinhos vivos
+    alive_downstream = [
+        viz for viz in downstream_neighbors
+        if db.is_neighbor_alive(viz, HEARTBEAT_TIMEOUT)
+    ]
+
+    if alive_downstream:
+        for downstream in alive_downstream:
             fwd_msg = Message(Message.VIDEO_METRIC_RESPONSE, db.get_my_ip(downstream))
             fwd_msg.metrics_encode_per_stream(
                 streams,
@@ -360,7 +457,109 @@ def metric_response_handler(msg: Message, db: DataBase):
             )
             send_message(fwd_msg, downstream, ROUTERS_RECEIVER_PORT)
             log_ev("METRIC_RESP_FWD", req=request_id, to=downstream, costs=stream_costs)
+    else:
+        log_ev("METRIC_RESP_NO_ALIVE_DOWN", req=request_id, msg="No alive downstream neighbors")
+
+
+def metric_update_handler(msg: Message, db: DataBase):
+    try:
+        payload = msg.metrics_decode()
+    except Exception as e:
+        print(f"[ONODE][METRIC_UPDATE] Failed to decode: {e}")
+        return
     
+    if not isinstance(payload, dict):
+        print(f"[ONODE][METRIC_UPDATE] Invalid payload type")
+        return
+    
+    streams = payload.get("streams", [])
+    accumulated_delays = payload.get("accumulated_delays", {})
+    request_id = payload.get("request_id")
+    
+    if not isinstance(accumulated_delays, dict):
+        if isinstance(accumulated_delays, (int, float)):
+            accumulated_delays = {s: float(accumulated_delays) for s in streams}
+        else:
+            accumulated_delays = {s: 0.0 for s in streams}
+    
+    if not streams:
+        print("[ONODE][METRIC_UPDATE] Missing streams")
+        return
+    
+    stream_costs = {}
+    
+    for stream in streams:
+        incoming_delay = float(accumulated_delays.get(stream, 0))
+        adjusted_delay = _apply_delay_adjustments(incoming_delay, stream, db)
+        stream_costs[stream] = adjusted_delay
+        
+        log_ev("METRIC_UPDATE_RECV",
+               req=request_id,
+               stream=stream,
+               cost=adjusted_delay,
+               parent=msg.getSrc(),
+               has_cache=_is_stream_active_locally(stream, db))
+    
+    for stream in streams:
+        db.AtualizaMetricas(msg.getSrc(), [stream], stream_costs[stream])
+        current_upstream = _upstream_for(stream, db)
+        if db.update_announce(stream, stream_costs[stream], msg.getSrc()):
+            _check_and_switch_parent(stream, current_upstream, db)
+
+    stored = db.get_metric_request(request_id) if request_id else None
+    
+    if stored:
+        downstream = stored.get("src")
+        # NOVO: Verifica se downstream está vivo antes de propagar
+        if downstream and downstream != msg.getSrc() and db.is_neighbor_alive(downstream, HEARTBEAT_TIMEOUT):
+            rtt = measure_rtt(downstream)
+            
+            new_delays = {s: stream_costs[s] + rtt for s in streams}
+            
+            update_msg = Message(Message.VIDEO_METRIC_UPDATE, db.get_my_ip(downstream))
+            update_msg.metrics_encode_per_stream(
+                streams,
+                request_id=request_id,
+                accumulated_delays=new_delays
+            )
+            send_message(update_msg, downstream, ROUTERS_RECEIVER_PORT)
+            log_ev("METRIC_UPDATE_FWD", req=request_id, to=downstream, costs=new_delays)
+        elif downstream and downstream != msg.getSrc():
+            log_ev("METRIC_UPDATE_DOWN_DEAD", req=request_id, downstream=downstream)
+        
+        db.remove_metric_request(request_id)
+    else:
+        with db.lock:
+            downstream_neighbors = set()
+            for stream in streams:
+                for viz, active_streams in db.active_streams_table.items():
+                    if active_streams.get(stream) == 1 and viz != msg.getSrc():
+                        downstream_neighbors.add(viz)
+            
+            # NOVO: Filtra apenas vizinhos vivos
+            alive_downstream = [
+                viz for viz in downstream_neighbors
+                if db.is_neighbor_alive(viz, HEARTBEAT_TIMEOUT)
+            ]
+            
+            for downstream in alive_downstream:
+                rtt = measure_rtt(downstream)
+                new_delays = {s: stream_costs[s] + rtt for s in streams}
+                
+                update_msg = Message(Message.VIDEO_METRIC_UPDATE, db.get_my_ip(downstream))
+                update_msg.metrics_encode_per_stream(
+                    streams,
+                    request_id=request_id or f"fwd-{int(dt.datetime.now().timestamp()*1000)}",
+                    accumulated_delays=new_delays
+                )
+                send_message(update_msg, downstream, ROUTERS_RECEIVER_PORT)
+                log_ev("METRIC_UPDATE_BCAST", req=request_id, to=downstream, costs=new_delays)
+            
+            if not alive_downstream and downstream_neighbors:
+                log_ev("METRIC_UPDATE_ALL_DOWN_DEAD", 
+                       req=request_id, 
+                       dead_count=len(downstream_neighbors))
+
 
 def metric_update_handler(msg: Message, db: DataBase):
     try:
