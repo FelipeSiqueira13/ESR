@@ -30,7 +30,7 @@ ANNOUNCE_TYPE = Message.VIDEO_METRIC_REQUEST  # reutilizamos como ANNOUNCE
 
 HEARTBEAT_INTERVAL = 1      # segundos
 HEARTBEAT_TIMEOUT  = 3      # segundos (reduzido para detecção mais rápida de falhas)
-HYST_FACTOR = 0.75           
+HYST_FACTOR = 0.80           
 
 HOP_PENALTY_PERCENT = 0.15
 CACHE_BONUS_PERCENT = 0.35   
@@ -178,99 +178,6 @@ def _is_stream_active_locally(stream_id: str, db: DataBase) -> bool:
             return True
     
     return False
-
-
-def metric_request_handler(msg: Message, db: DataBase):
-    try:
-        payload = msg.metrics_decode()
-    except Exception as e:
-        print(f"Error decoding metrics: {e}")
-        import traceback
-        traceback.print_exc()
-        return
-
-    request_id = payload.get("request_id")
-    streams = payload.get("streams", [])
-    
-    accumulated_delays = payload.get("accumulated_delays", {})
-    
-    if not isinstance(accumulated_delays, dict):
-        print(f"Invalid accumulated_delays type: {type(accumulated_delays)}, converting...")
-        if isinstance(accumulated_delays, (int, float)):
-            accumulated_delays = {s: float(accumulated_delays) for s in streams}
-        else:
-            accumulated_delays = {s: 0.0 for s in streams}
-    
-    if not request_id:
-        return
-
-    sender = msg.getSrc()
-    
-    stream_costs = {}  # {stream_id: adjusted_cost}
-    
-    for stream in streams:
-        incoming_delay = float(accumulated_delays.get(stream, 0))
-        
-        total_delay = _apply_delay_adjustments(incoming_delay, stream, db)
-        stream_costs[stream] = total_delay
-        
-        log_ev("METRIC_REQ_RECV", 
-               req=request_id,
-               stream=stream,
-               delay_before=incoming_delay,
-               delay_after=total_delay,
-               local_cache=_is_stream_active_locally(stream, db),
-               from_=sender)
-    
-    # Armazena requisição
-    db.store_metric_request(request_id, {
-        "streams": streams,
-        "src": sender
-    })
-
-    # Atualiza tabela de roteamento por stream
-    should_propagate = False
-    streams_to_propagate = []
-    
-    for stream in streams:
-        if stream not in db.available_streams:
-            db.addStream(stream, sender)
-        
-        current_upstream = _upstream_for(stream, db)
-        cost = stream_costs[stream]
-        
-        if db.update_announce(stream, cost, sender):
-            should_propagate = True
-            streams_to_propagate.append(stream)
-            _check_and_switch_parent(stream, current_upstream, db)
-
-    if not should_propagate:
-        log_ev("METRIC_REQ_DROP", req=request_id, msg="Worse paths, not propagating")
-        return
-
-    # Propaga apenas streams que melhoraram
-    neighbors = db.get_vizinhos()
-    targets = [n for n in neighbors if n != sender]
-    
-    if targets and streams_to_propagate:
-        for neighbor in targets:
-            rtt = measure_rtt(neighbor)
-            
-            # Calcula delays por stream para este vizinho
-            new_accumulated_delays = {}
-            for stream in streams_to_propagate:
-                new_accumulated_delays[stream] = stream_costs[stream] + rtt
-            
-            fwd_msg = Message(Message.VIDEO_METRIC_REQUEST, db.get_my_ip(neighbor))
-            fwd_msg.metrics_encode_per_stream(
-                streams_to_propagate,
-                request_id=request_id,
-                accumulated_delays=new_accumulated_delays
-            )
-            send_message(fwd_msg, neighbor, ROUTERS_RECEIVER_PORT)
-            log_ev("METRIC_REQ_FWD", req=request_id, to=neighbor, streams=streams_to_propagate, rtt=rtt)
-    else:
-        log_ev("METRIC_REQ_LEAF", req=request_id, msg="No neighbors or no improved streams")
 
 def metric_request_handler(msg: Message, db: DataBase):
     try:
@@ -526,7 +433,8 @@ def metric_update_handler(msg: Message, db: DataBase):
                 for viz, active_streams in db.active_streams_table.items():
                     if active_streams.get(stream) == 1 and viz != msg.getSrc():
                         downstream_neighbors.add(viz)
-                        alive_downstream = [
+
+            alive_downstream = [
                 viz for viz in downstream_neighbors
                 if db.is_neighbor_alive(viz, HEARTBEAT_TIMEOUT)
             ]
@@ -548,93 +456,6 @@ def metric_update_handler(msg: Message, db: DataBase):
                 log_ev("METRIC_UPDATE_ALL_DOWN_DEAD", 
                        req=request_id, 
                        dead_count=len(downstream_neighbors))
-
-
-def metric_update_handler(msg: Message, db: DataBase):
-    try:
-        payload = msg.metrics_decode()
-    except Exception as e:
-        print(f"Failed to decode: {e}")
-        return
-    
-    if not isinstance(payload, dict):
-        print(f"Invalid payload type")
-        return
-    
-    streams = payload.get("streams", [])
-    accumulated_delays = payload.get("accumulated_delays", {})
-    request_id = payload.get("request_id")
-    
-    if not isinstance(accumulated_delays, dict):
-        if isinstance(accumulated_delays, (int, float)):
-            accumulated_delays = {s: float(accumulated_delays) for s in streams}
-        else:
-            accumulated_delays = {s: 0.0 for s in streams}
-    
-    if not streams:
-        print("Missing streams")
-        return
-    
-    stream_costs = {}
-    
-    for stream in streams:
-        incoming_delay = float(accumulated_delays.get(stream, 0))
-        adjusted_delay = _apply_delay_adjustments(incoming_delay, stream, db)
-        stream_costs[stream] = adjusted_delay
-        
-        log_ev("METRIC_UPDATE_RECV",
-               req=request_id,
-               stream=stream,
-               cost=adjusted_delay,
-               parent=msg.getSrc(),
-               has_cache=_is_stream_active_locally(stream, db))
-
-    for stream in streams:
-        db.AtualizaMetricas(msg.getSrc(), [stream], stream_costs[stream])
-        current_upstream = _upstream_for(stream, db)
-        if db.update_announce(stream, stream_costs[stream], msg.getSrc()):
-            _check_and_switch_parent(stream, current_upstream, db)
-
-    stored = db.get_metric_request(request_id) if request_id else None
-    
-    if stored:
-        downstream = stored.get("src")
-        if downstream and downstream != msg.getSrc():
-            rtt = measure_rtt(downstream)
-            
-            new_delays = {s: stream_costs[s] + rtt for s in streams}
-            
-            update_msg = Message(Message.VIDEO_METRIC_UPDATE, db.get_my_ip(downstream))
-            update_msg.metrics_encode_per_stream(
-                streams,
-                request_id=request_id,
-                accumulated_delays=new_delays
-            )
-            send_message(update_msg, downstream, ROUTERS_RECEIVER_PORT)
-            log_ev("METRIC_UPDATE_FWD", req=request_id, to=downstream, costs=new_delays)
-        
-        db.remove_metric_request(request_id)
-    else:
-        with db.lock:
-            downstream_neighbors = set()
-            for stream in streams:
-                for viz, active_streams in db.active_streams_table.items():
-                    if active_streams.get(stream) == 1 and viz != msg.getSrc():
-                        downstream_neighbors.add(viz)
-            
-            for downstream in downstream_neighbors:
-                rtt = measure_rtt(downstream)
-                new_delays = {s: stream_costs[s] + rtt for s in streams}
-                
-                update_msg = Message(Message.VIDEO_METRIC_UPDATE, db.get_my_ip(downstream))
-                update_msg.metrics_encode_per_stream(
-                    streams,
-                    request_id=request_id or f"fwd-{int(dt.datetime.now().timestamp()*1000)}",
-                    accumulated_delays=new_delays
-                )
-                send_message(update_msg, downstream, ROUTERS_RECEIVER_PORT)
-                log_ev("METRIC_UPDATE_BCAST", req=request_id, to=downstream, costs=new_delays)
-
 
 # =============================================================
 #                      PRINCIPAL THREADS
