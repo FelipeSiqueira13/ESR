@@ -22,7 +22,7 @@ def convert_to_custom_mjpeg(input_video_path, output_mjpeg_path):
             # tamanho pequeno e a 25% pra funcionar
             frame = cv2.resize(frame, (3*480//4, 3*360//4))
 
-            ret, jpeg_data = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 15])
+            ret, jpeg_data = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 10])
             
             if not ret:
                 continue

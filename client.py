@@ -362,7 +362,6 @@ def udp_listener(bind_ip):
 def _display_frame(frame_data, window_title):
     global _display_warned, _ffplay_process
     
-    # Auto-restart ffplay if it crashed or was closed
     if _ffplay_process is None and _detect_ffplay():
         _start_ffplay(window_title)
 
@@ -375,12 +374,6 @@ def _display_frame(frame_data, window_title):
         except (BrokenPipeError, OSError):
             _stop_ffplay()
     
-    # 2. Fallback para OpenCV
-    if not _GUI_AVAILABLE:
-        if not _display_warned:
-            _display_warned = True
-            print("[CLIENT][VIDEO] GUI indisponível; exibindo apenas fallback headless.")
-        return False
 
     frame_array = np.frombuffer(frame_data, dtype=np.uint8)
     img = cv2.imdecode(frame_array, cv2.IMREAD_COLOR)
@@ -432,12 +425,11 @@ def _ensure_http_server():
     try:
         _http_server = _ThreadedHTTPServer(('', MJPEG_HTTP_PORT), _MJPEGHandler)
     except OSError as e:
-        print(f"[CLIENT][VIDEO] Falha ao iniciar servidor MJPEG: {e}")
+        print(f"Falha ao iniciar servidor MJPEG: {e}")
         return
     _http_thread = threading.Thread(target=_http_server.serve_forever, daemon=True)
     _http_thread.start()
-    print("[CLIENT][VIDEO] Servidor MJPEG headless ativo apenas para integrações automáticas.")
-
+    print("Servidor MJPEG headless ativo apenas para integrações automáticas.")
 def _stop_http_server():
     global _http_server, _http_thread
     if _http_server:
@@ -471,68 +463,54 @@ def _playback_loop(stream_id):
         with _frame_lock:
             buf = _frame_buffer.get(stream_id)
             if buf is not None:
-                # Debug: Print buffer status every 100 iterations or if critical
-                # if len(buf) < 5:
-                #    print(f"[DEBUG] Low buffer: {len(buf)} frames. Expected: {expected}")
 
-                # Inicializa expected se for a primeira vez
                 if expected is None:
                     if len(buf) >= MIN_BUFFER:
                         expected = min(buf.keys())
                         buffering = False
-                        print(f"[CLIENT] Buffer cheio ({len(buf)} frames). Iniciando playback em {expected}.")
+                        print(f"Buffer cheio ({len(buf)} frames). Iniciando playback em {expected}.")
                     else:
-                        # Ainda enchendo buffer inicial
                         if len(buf) % 10 == 0:
-                            print(f"[CLIENT][BUF] enchendo buffer: {len(buf)}/{MIN_BUFFER}")
+                            print(f"Enchendo buffer: {len(buf)}/{MIN_BUFFER}")
                         time.sleep(0.01)
                         continue
                 
-                # Se estamos em estado de buffering (re-buffer por falta de dados)
                 if buffering:
                     if len(buf) >= MIN_BUFFER:
                         buffering = False
-                        print(f"[CLIENT][BUF] rebuffer concluído; buffer={len(buf)}")
+                        print(f"Rebuffer concluído; buffer={len(buf)}")
                     else:
                         time.sleep(0.01)
                         continue
 
-                # Limpeza de frames antigos (atrasados que chegaram depois de termos pulado)
-                # Se houver frames no buffer menores que 'expected', descarte-os.
                 if expected is not None:
                     old_frames = [k for k in buf.keys() if k < expected]
                     if old_frames:
                         for k in old_frames:
                             buf.pop(k)
 
-                # Tenta pegar o frame esperado
                 if expected in buf:
                     frame = buf.pop(expected)
                     
                     expected += 1
                     last_frame_time = current_time
                 else:
-                    # Frame esperado não está. Verifica se tem futuros.
                     higher = [n for n in buf.keys() if n > expected]
                     if higher:
-                        # Temos frames futuros, mas o esperado falta.
-                        # Se esperamos pouco tempo, continua esperando (pode estar fora de ordem)
                         wait_time = current_time - last_frame_time
                         if wait_time < MAX_WAIT_MISSING:
-                            # Ainda damos chance para o frame chegar
+
                             pass 
                         else:
-                            # Timeout de espera: pula para o próximo disponível
+
                             next_num = min(higher)
-                            print(f"[CLIENT][DROP] frame {expected} atrasado; pulando para {next_num} (buffer={len(buf)})")
+                            print(f"Frame {expected} atrasado; pulando para {next_num} (buffer={len(buf)})")
                             frame = buf.pop(next_num)
                             expected = next_num + 1
                             last_frame_time = current_time
                     else:
-                        # Não tem esperado nem futuros -> Buffer vazio ou stream parou
-                        # Se ficar vazio, entra em modo buffering
                         if len(buf) == 0:
-                            print(f"[CLIENT][BUF] vazio após frame {expected-1}; rebuffer...")
+                            print(f"Buffer vazio após frame {expected-1}; rebuffer...")
                             buffering = True
 
         if frame is None:
@@ -544,9 +522,6 @@ def _playback_loop(stream_id):
             _update_http_frame(stream_id, frame)
             time.sleep(0.02)
             continue
-        
-        # Controle de FPS simples (opcional, pois o ffplay já controla, mas ajuda a não drenar buffer instantaneamente)
-        # time.sleep(0.025) 
 
     _stop_ffplay()
     if cv2 is not None:
@@ -585,11 +560,11 @@ def send_stream_stop(node_host, node_port, client_name, stream_number):
         msg = Message(Message.STREAM_STOP, source, stream_number)
         resp = send_tcp_request(node_host, node_port, msg)
         if resp:
-            print(f"[CLIENT] STREAM_STOP sent for {stream_number}. Response: {resp.getData()}")
+            print(f"STREAM_STOP sent for {stream_number}. Response: {resp.getData()}")
         else:
-            print(f"[CLIENT] STREAM_STOP sent for {stream_number}. No response.")
+            print(f"STREAM_STOP sent for {stream_number}. No response.")
     except Exception as e:
-        print(f"[CLIENT] STREAM_STOP error: {e}")
+        print(f"STREAM_STOP error: {e}")
 
 def send_ping(node_host, node_port, client_name, stream_id, ttl=8):
     source = get_client_ip(client_name)
@@ -618,19 +593,15 @@ def main():
         print(f"Could not determine IP for client {clientName}")
         sys.exit(1)
 
-    # Guarda IP global para respostas de heartbeat
     global _client_ip
     _client_ip = my_ip
 
-    # Inicia listener UDP de frames
     t_udp = threading.Thread(target=udp_listener, args=(my_ip,), daemon=True)
     t_udp.start()
 
-    # Inicia listener de heartbeat/controle leve para não derrubar o cliente
     t_hb = threading.Thread(target=heartbeat_listener, args=(my_ip,), daemon=True)
     t_hb.start()
 
-    # Envia heartbeats periódicos para o roteador, como o servidor faz
     t_hb_send = threading.Thread(target=heartbeat_sender, args=(node_host, my_ip), daemon=True)
     t_hb_send.start()
 
@@ -666,7 +637,6 @@ def main():
                 print("       PRESS CTRL+C TO STOP STREAM AND EXIT       ")
                 print("==================================================")
 
-        # Loop de streaming (mantém main thread viva enquanto UDP thread imprime)
         while True:
             time.sleep(1)
 
@@ -678,7 +648,6 @@ def main():
         
         _stop_playback()
 
-        # Fecha socket UDP para desbloquear recvfrom IMEDIATAMENTE
         if _udp_sock:
             try:
                 _udp_sock.close()
