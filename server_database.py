@@ -126,12 +126,11 @@ class ServerDataBase():
         with self.lock:
             return [viz for viz, status in self.server_vizinhos.items() if status == 1]
 
-    def register_metric_request(self, request_id, vizinho, streams, start_time):
+    def register_metric_request(self, request_id, vizinho, streams):
         with self.lock:
             self.pending_metric_requests[request_id] = {
                 "neighbor": vizinho,
-                "streams": list(streams),
-                "start_time": start_time
+                "streams": list(streams)
             }
 
     def record_metric(self, vizinho, streams, delay_ms, request_id=None):

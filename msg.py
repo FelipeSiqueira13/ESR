@@ -49,12 +49,10 @@ class Message:
     def encode(self) -> bytes:
         return self.serialize()
 
-    def metrics_encode(self, streams_id: list, request_id: Optional[str] = None, start_time: Optional[dt.datetime] = None, accumulated_delay_ms: float = 0) -> bytes:
-        started_at = (start_time or dt.datetime.now()).isoformat()
+    def metrics_encode(self, streams_id: list, request_id: Optional[str] = None, accumulated_delay_ms: float = 0) -> bytes:
         payload = {
             "request_id": request_id or f"req-{int(dt.datetime.now().timestamp()*1000)}",
             "streams": streams_id,
-            "start_time": started_at,
             "accumulated_delay_ms": accumulated_delay_ms
         }
         self.data = json.dumps(payload)
@@ -62,9 +60,6 @@ class Message:
     
     def metrics_decode(self):
         payload = json.loads(self.data or "{}")
-        start_time = payload.get("start_time")
-        if start_time:
-            payload["start_time"] = dt.datetime.fromisoformat(start_time)
         payload.setdefault("streams", [])
         return payload
 

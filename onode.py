@@ -172,12 +172,11 @@ def metric_request_handler(msg: Message, db: DataBase):
         return
 
     request_id = payload.get("request_id")
-    start_time = payload.get("start_time")
     streams = payload.get("streams", [])
     accumulated_delay = float(payload.get("accumulated_delay_ms", 0))
     
     
-    if not request_id or not start_time:
+    if not request_id:
         return
 
     hop_penalty = HOP_PENALTY_MS
@@ -190,18 +189,10 @@ def metric_request_handler(msg: Message, db: DataBase):
             active_streams.append(stream)
 
     # Calcula delay acumulado até aqui (Server -> ... -> Eu)
-    # O start_time é absoluto do servidor.
     # accumulated_delay vem da mensagem anterior (soma dos links até o vizinho).
-    # Mas aqui estamos medindo tempo total absoluto.
     
-    # Na verdade, o accumulated_delay_ms no payload é o delay até o nó ANTERIOR.
-    # Precisamos somar o RTT/Link delay do vizinho até mim?
-    # O payload traz "accumulated_delay_ms".
-    # Vamos assumir que o delay do link já foi medido ou será inferido pela diferença de tempo?
-    
-    # Se usarmos relógios sincronizados (simulação), (now - start_time) é o delay total absoluto.
-    total_delay_absolute = (dt.datetime.now() - start_time).total_seconds() * 1000
-    total_delay = total_delay_absolute + hop_penalty - cache_bonus
+    # NOVA LÓGICA: Usa o delay acumulado vindo da mensagem (que já inclui o RTT do link anterior medido pelo sender)
+    total_delay = accumulated_delay + hop_penalty - cache_bonus
     
     log_ev("METRIC_REQ_RECV", 
            req=request_id,
@@ -211,7 +202,6 @@ def metric_request_handler(msg: Message, db: DataBase):
     
     # Armazena requisição para processar a resposta depois (se houver)
     db.store_metric_request(request_id, {
-        "start_time": start_time,
         "streams": streams,
         "src": msg.getSrc()
     })
@@ -244,15 +234,17 @@ def metric_request_handler(msg: Message, db: DataBase):
     
     if targets:
         for neighbor in targets:
+            # Mede RTT até o vizinho antes de enviar
+            rtt = measure_rtt(neighbor)
+            
             fwd_msg = Message(Message.VIDEO_METRIC_REQUEST, db.get_my_ip(neighbor))
             fwd_msg.metrics_encode(
                 streams,
                 request_id=request_id,
-                start_time=start_time,
-                accumulated_delay_ms=total_delay
+                accumulated_delay_ms=total_delay + rtt # Adiciona custo do link
             )
             send_message(fwd_msg, neighbor, ROUTERS_RECEIVER_PORT)
-            log_ev("METRIC_REQ_FWD", req=request_id, to=neighbor, delay=total_delay)
+            log_ev("METRIC_REQ_FWD", req=request_id, to=neighbor, delay=total_delay + rtt, rtt=rtt)
     else:
         log_ev("METRIC_REQ_LEAF", req=request_id, msg="No other neighbors to forward")
 
@@ -271,7 +263,6 @@ def metric_response_handler(msg: Message, db: DataBase):
     request_id = payload.get("request_id")
     incoming_delay = float(payload.get("accumulated_delay_ms", 0))
     streams = payload.get("streams", [])
-    start_time = payload.get("start_time")
     
     if not request_id or not streams:
         print("[ONODE][METRIC_RESP] Missing request_id or streams")
@@ -321,7 +312,6 @@ def metric_response_handler(msg: Message, db: DataBase):
             fwd_msg.metrics_encode(
                 streams,
                 request_id=request_id,
-                start_time=start_time,
                 accumulated_delay_ms=total_delay_ms
             )
             send_message(fwd_msg, downstream, ROUTERS_RECEIVER_PORT)
@@ -376,15 +366,15 @@ def metric_update_handler(msg: Message, db: DataBase):
         # Se temos a requisição original, propaga para quem pediu
         downstream = stored.get("src")
         if downstream and downstream != msg.getSrc():
+            rtt = measure_rtt(downstream)
             update_msg = Message(Message.VIDEO_METRIC_UPDATE, db.get_my_ip(downstream))
             update_msg.metrics_encode(
                 streams,
                 request_id=request_id,
-                start_time=stored.get("start_time"),
-                accumulated_delay_ms=adjusted_delay
+                accumulated_delay_ms=adjusted_delay + rtt
             )
             send_message(update_msg, downstream, ROUTERS_RECEIVER_PORT)
-            log_ev("METRIC_UPDATE_FWD", req=request_id, streams=streams, cost=adjusted_delay, parent=msg.getSrc(), delay_ms=accumulated_delay, to=downstream, from_=msg.getSrc())
+            log_ev("METRIC_UPDATE_FWD", req=request_id, streams=streams, cost=adjusted_delay + rtt, parent=msg.getSrc(), delay_ms=adjusted_delay, to=downstream, from_=msg.getSrc(), rtt=rtt)
         
         # Remove requisição processada
         db.remove_metric_request(request_id)
@@ -400,15 +390,15 @@ def metric_update_handler(msg: Message, db: DataBase):
                         downstream_neighbors.add(viz)
             
             for downstream in downstream_neighbors:
+                rtt = measure_rtt(downstream)
                 update_msg = Message(Message.VIDEO_METRIC_UPDATE, db.get_my_ip(downstream))
                 update_msg.metrics_encode(
                     streams,
                     request_id=request_id or f"fwd-{int(dt.datetime.now().timestamp()*1000)}",
-                    start_time=dt.datetime.now(),
-                    accumulated_delay_ms=adjusted_delay
+                    accumulated_delay_ms=adjusted_delay + rtt
                 )
                 send_message(update_msg, downstream, ROUTERS_RECEIVER_PORT)
-                log_ev("METRIC_UPDATE_BCAST", req=request_id, streams=streams, cost=adjusted_delay, parent=msg.getSrc(), delay_ms=accumulated_delay, to=downstream, from_=msg.getSrc())
+                log_ev("METRIC_UPDATE_BCAST", req=request_id, streams=streams, cost=adjusted_delay + rtt, parent=msg.getSrc(), delay_ms=adjusted_delay, to=downstream, from_=msg.getSrc(), rtt=rtt)
 
 
 # =============================================================

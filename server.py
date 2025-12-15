@@ -279,6 +279,16 @@ def heartbeat_check(sdb: ServerDataBase):
         finally:
             time.sleep(HEARTBEAT_INTERVAL)
 
+def measure_rtt(host: str, port: int = ROUTERS_RECEIVER_PORT, timeout: float = 1.0) -> float:
+    """Mede RTT aproximado até host:port em ms; retorna valor alto em caso de erro."""
+    try:
+        t0 = time.time()
+        with socket.create_connection((host, port), timeout=timeout):
+            pass
+        return (time.time() - t0) * 1000.0
+    except Exception:
+        return 1_000_000.0
+
 def metric_updater(sdb:ServerDataBase):
     print("Metric updater thread started")
     while True:
@@ -286,12 +296,16 @@ def metric_updater(sdb:ServerDataBase):
             awake_neighbors = sdb.get_awake_neighbors()
             for viz in awake_neighbors:
                 streams = sdb.get_streams()
-                start_time = dt.datetime.now()
                 request_id = f"req-{uuid.uuid4().hex[:10]}"
-                sdb.register_metric_request(request_id, viz, streams, start_time)
-                print(f"METRIC_UPDATE to={viz} streams={streams} request_id={request_id}")
+                sdb.register_metric_request(request_id, viz, streams)
+                
+                # Mede RTT até o vizinho antes de enviar
+                rtt = measure_rtt(viz)
+                
+                print(f"METRIC_UPDATE to={viz} streams={streams} request_id={request_id} rtt={rtt:.2f}ms")
                 msg = Message(Message.VIDEO_METRIC_REQUEST, sdb.get_my_ip(viz))
-                msg.metrics_encode(streams, request_id=request_id, start_time=start_time)
+                # Inclui o RTT como delay inicial acumulado
+                msg.metrics_encode(streams, request_id=request_id, accumulated_delay_ms=rtt)
                 send_control_message(viz, msg)
         except Exception as e:
             print("Error in metric updater: ", e)
