@@ -64,7 +64,7 @@ def _detect_ffplay():
 def _start_ffplay(window_title):
     global _ffplay_process
     if not _detect_ffplay():
-        # print("ffplay not found.")
+        print("ffplay not found.")
         return False
     
     try:
@@ -91,9 +91,7 @@ def _start_ffplay(window_title):
             "-loglevel", "error", 
             "-i", "-"
         ]
-        # Use DEVNULL for stdout/stderr to keep terminal clean, unless debugging
         _ffplay_process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        # print(f"[CLIENT] ffplay started for {window_title}")
         return True
     except Exception as e:
         print(f"Error starting ffplay: {e}")
@@ -291,7 +289,6 @@ def udp_listener(bind_ip):
     _udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     _udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024) # Increase buffer to 1MB
     _udp_sock.bind((bind_ip, SENDER_PORT))
-    # print(f"[CLIENT][UDP] listening on {bind_ip}:{SENDER_PORT}")
     
     packets_received = 0
     while _running:
@@ -303,30 +300,24 @@ def udp_listener(bind_ip):
             try:
                 pkt = SimplePacket.decode(raw)
             except Exception as e:
-                print(f"[CLIENT][UDP][DROP] decode: {e}")
+                print(f"decode: {e}")
                 continue
 
             payload = pkt.get_payload()
             if b'\0' not in payload:
-                print("[CLIENT][UDP][DROP] malformed payload (no NUL)")
                 continue
             stream_id_b, batch_data = payload.split(b'\0', 1)
             try:
                 stream_id = stream_id_b.decode('utf-8')
             except Exception:
-                print("[CLIENT][UDP][DROP] bad stream_id bytes")
+                print("bad stream_id bytes")
                 continue
 
             base_frame_num = pkt.get_frame_num()
             
             printed_bits = []
             try:
-                # Unpack batch: Count(1B) + [Len(4B) + Frame]*Count
                 if len(batch_data) < 1:
-                     # Fallback for single frame (old format) or empty
-                     # Assuming new format always has count. 
-                     # If we want backward compatibility, we check if it looks like a batch.
-                     # But let's assume we upgraded the protocol.
                      raise ValueError("Empty batch data")
 
                 count = struct.unpack("!B", batch_data[:1])[0]
@@ -348,7 +339,6 @@ def udp_listener(bind_ip):
                         current_frame_num = base_frame_num + i
                         buf[current_frame_num] = frame_b
 
-                        # preview limited bits for console visualization
                         bit_preview = " ".join(f"{byte:08b}" for byte in frame_b[:8])
                         printed_bits.append((current_frame_num, bit_preview))
                     
@@ -358,17 +348,13 @@ def udp_listener(bind_ip):
                         buf.pop(oldest, None)
 
             except Exception as e:
-                print(f"[CLIENT][UDP][DROP] batch decode error: {e}")
+                print(f"batch decode error: {e}")
                 continue
 
-            # Exibe bits dos frames recebidos em vez das mensagens de debug
-            # if _running and printed_bits:
-            #     for frame_num, bits in printed_bits:
-            #         print(f"[CLIENT][BITS] stream={stream_id} frame={frame_num} bits={bits}...")
         except OSError:
             break
         except Exception as e:
-            print(f"[CLIENT][UDP][ERR] {e}")
+            print(f"UDP error: {e}")
     
     if _udp_sock:
         _udp_sock.close()

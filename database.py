@@ -12,7 +12,6 @@ class DataBase():
 
     def __init__(self, name):
 
-        # ----------- CARREGA CONFIG E VIZINHOS DO ARQUIVO 1 -----------
         config_file = Path("topologies") / CURRENT_TOPOLOGY / f"{name}.json"
 
         try:
@@ -22,17 +21,13 @@ class DataBase():
             print("Error: File Not Found")
             sys.exit(1)
 
-        # agora os valores podem ser listas; normaliza para dict ip -> [viz1, viz2, ...]
         raw = ip_config.get(name, {})
         self.ip_to_viz = {ip: (v if isinstance(v, list) else [v]) for ip, v in raw.items()}
         
-        # Define my_ip para binding
         my_ips = list(raw.keys())
         if len(my_ips) == 1:
             self.my_ip = my_ips[0]
         else:
-            # Se tiver multiplas interfaces (Router) ou nenhuma, bind em todas (0.0.0.0)
-            # Isso garante funcionamento no CORE para routers e evita erros de logica
             self.my_ip = "0.0.0.0"
 
         self.lock = threading.RLock()
@@ -121,7 +116,7 @@ class DataBase():
                         and self.streams_metrics[viz][stream] > 0):
                         self.streams_origin_table[stream] = viz
                         
-                print(f"[ONODE][METRIC_APPLY] viz={viz} stream={stream} metric={self.streams_metrics[viz][stream]:.2f}")
+                print(f"APLICAR METRICAS viz={viz} stream={stream} metric={self.streams_metrics[viz][stream]:.2f}")
     
     def StreamDeativated(self, viz, streams_id):
         with self.lock:
@@ -132,13 +127,11 @@ class DataBase():
     def activateStream(self, viz, stream_id):
         with self.lock:
             if stream_id in self.available_streams and viz in self.active_streams_table:
-                # Use .get() to avoid KeyError if stream_id is missing for some neighbor
                 already_active = any(
                     self.active_streams_table[v].get(stream_id, 0) == 1 for v in self.vizinhos
                 )
                 self.active_streams_table[viz][stream_id] = 1
                 print(f"Stream {stream_id} activated for neighbour {viz}.\n")
-                # precisa pedir upstream se antes não havia nenhum ativo
                 need_upstream = not already_active
             else:
                 print(f"ERROR: Stream {stream_id} cannot be activated for {viz}.\n")
@@ -150,8 +143,6 @@ class DataBase():
             if stream_id in self.available_streams and viz in self.active_streams_table:
                 self.active_streams_table[viz][stream_id] = 0
                 
-                # Debug: Print state of all neighbors for this stream
-                print(f"[DB][DEACTIVATE] Checking active status for stream {stream_id}:")
                 for v in self.vizinhos:
                     status = self.active_streams_table[v].get(stream_id, "N/A")
                     print(f"  - {v}: {status}")
@@ -192,13 +183,11 @@ class DataBase():
             return False
         return (dt.datetime.now() - ts).total_seconds() < timeout_s
 
-    # ---------------- Best parent/cost ----------------
     def update_announce(self, stream_id: str, cost: float, parent_ip: str) -> bool:
         with self.lock:
             prev = self.best_cost.get(stream_id, math.inf)
             curr_parent = self.best_parent.get(stream_id)
 
-            # Se for do mesmo pai, atualiza sempre (para refletir piora ou melhora)
             if parent_ip == curr_parent:
                 self.best_cost[stream_id] = cost
                 return True
@@ -217,7 +206,6 @@ class DataBase():
         with self.lock:
             return self.best_cost.get(stream_id, math.inf)
 
-    # ---------------- Downstream ativos ----------------
     def set_downstream_active(self, viz: str, stream_id: str, active: bool):
         with self.lock:
             ds = self.downstream.setdefault(stream_id, set())
@@ -235,28 +223,10 @@ class DataBase():
             return bool(self.downstream.get(stream_id))
 
 
-# =============================================================
-#                       MAIN PARA TESTE
-# =============================================================
+
 if __name__ == '__main__':
     if len(sys.argv) < 2:
-        db = DataBase("R1")   # alterar depois no trabalho final
-
-        print(list(db.get_vizinhos()))
-        print(db.get_my_ip(list(db.get_vizinhos())[0]))
-
-        # testes antigos
-        db.printActiveStreamsTable()
-        db.addStream("s1", "10.0.0.10")
-        db.addStream("s2", "10.0.1.2")
-        db.addStream("s3", "10.0.1.2")
-
-        db.printActiveStreamsTable()
-
-        db.activateStream("10.0.1.2", "s1")
-        db.activateStream("10.0.2.2", "s2")
-        db.activateStream("10.0.2.2", "s3")
-
-        db.printActiveStreamsTable()
+        print("Error, few arguments")
+        sys.exit(1)
     else:
         db = DataBase(sys.argv[1])
