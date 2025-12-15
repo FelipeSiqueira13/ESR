@@ -49,6 +49,17 @@ class Message:
     def encode(self) -> bytes:
         return self.serialize()
 
+    def metrics_encode_per_stream(self, streams_id: list, request_id: Optional[str] = None, 
+                                   accumulated_delays: dict = None) -> bytes:
+        
+        payload = {
+            "request_id": request_id or f"req-{int(dt.datetime.now().timestamp()*1000)}",
+            "streams": streams_id,
+            "accumulated_delays": accumulated_delays or {s: 0 for s in streams_id}
+        }
+        self.data = json.dumps(payload)
+        return self.serialize()
+
     def metrics_encode(self, streams_id: list, request_id: Optional[str] = None, accumulated_delay_ms: float = 0) -> bytes:
         payload = {
             "request_id": request_id or f"req-{int(dt.datetime.now().timestamp()*1000)}",
@@ -59,8 +70,20 @@ class Message:
         return self.serialize()
     
     def metrics_decode(self):
+        
         payload = json.loads(self.data or "{}")
         payload.setdefault("streams", [])
+        
+        # Backward compatibility: converte formato antigo para novo
+        if "accumulated_delay_ms" in payload:
+            delay = payload["accumulated_delay_ms"]
+            streams = payload.get("streams", [])
+            payload["accumulated_delays"] = {s: delay for s in streams}
+        
+        # Garante que accumulated_delays sempre existe como dict
+        if "accumulated_delays" not in payload or not isinstance(payload.get("accumulated_delays"), dict):
+            payload["accumulated_delays"] = {s: 0.0 for s in payload.get("streams", [])}
+        
         return payload
 
     @staticmethod

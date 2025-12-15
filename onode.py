@@ -59,13 +59,19 @@ def _upstream_for(stream_id: str, db: DataBase):
         return parent
     return db.getStreamSource(stream_id)
 
-def _apply_delay_adjustments(current_delay_ms: float, has_cache: bool = False) -> float:
+def _apply_delay_adjustments(current_delay_ms: float, stream_id: str, db: DataBase) -> float:
+    
     penalized_delay = current_delay_ms * (1 + HOP_PENALTY_PERCENT)
-
+    
+    # Verifica se ESTA stream específica está ativa localmente
+    has_cache = _is_stream_active_locally(stream_id, db)
+    
     if has_cache:
         adjusted_delay = penalized_delay * (1 - CACHE_BONUS_PERCENT)
-
+        return adjusted_delay
+    
     return penalized_delay
+
 
 def _check_and_switch_parent(stream, current_upstream, db):
     new_upstream = _upstream_for(stream, db)
@@ -181,81 +187,92 @@ def metric_request_handler(msg: Message, db: DataBase):
 
     request_id = payload.get("request_id")
     streams = payload.get("streams", [])
-    accumulated_delay = float(payload.get("accumulated_delay_ms", 0))
     
+    # MUDANÇA: accumulated_delays agora é um dict {stream_id: delay}
+    accumulated_delays = payload.get("accumulated_delays", {})
+    
+    # Validação de segurança: garante que é dict
+    if not isinstance(accumulated_delays, dict):
+        print(f"[ONODE][METRIC_REQ] Invalid accumulated_delays type: {type(accumulated_delays)}, converting...")
+        # Converte para dict se vier como float (formato antigo)
+        if isinstance(accumulated_delays, (int, float)):
+            accumulated_delays = {s: float(accumulated_delays) for s in streams}
+        else:
+            accumulated_delays = {s: 0.0 for s in streams}
     
     if not request_id:
         return
 
-    has_cache = False
+    sender = msg.getSrc()
+    
+    # Processa cada stream individualmente
+    stream_costs = {}  # {stream_id: adjusted_cost}
+    
     for stream in streams:
-        if _is_stream_active_locally(stream, db):
-            has_cache = True
-            break
-
-    # Calcula delay acumulado até aqui (Server -> ... -> Eu)
-    # accumulated_delay vem da mensagem anterior (soma dos links até o vizinho).
+        # Pega o delay acumulado específico desta stream
+        incoming_delay = float(accumulated_delays.get(stream, 0))
+        
+        # Aplica ajustes específicos para esta stream
+        total_delay = _apply_delay_adjustments(incoming_delay, stream, db)
+        stream_costs[stream] = total_delay
+        
+        log_ev("METRIC_REQ_RECV", 
+               req=request_id,
+               stream=stream,
+               delay_before=incoming_delay,
+               delay_after=total_delay,
+               has_cache=_is_stream_active_locally(stream, db),
+               from_=sender)
     
-    # NOVA LÓGICA: Usa o delay acumulado vindo da mensagem (que já inclui o RTT do link anterior medido pelo sender)
-    total_delay = _apply_delay_adjustments(accumulated_delay, has_cache)
-    
-    log_ev("METRIC_REQ_RECV", 
-           req=request_id,
-           streams=streams,
-           delay_before=accumulated_delay,
-           delay_after= total_delay,
-           has_cache=has_cache,
-           from_=msg.getSrc())
-    
-    # Armazena requisição para processar a resposta depois (se houver)
+    # Armazena requisição
     db.store_metric_request(request_id, {
         "streams": streams,
-        "src": msg.getSrc()
+        "src": sender
     })
 
-    # Atualiza tabela de roteamento (Best Parent) baseada no custo (delay)
+    # Atualiza tabela de roteamento por stream
     should_propagate = False
+    streams_to_propagate = []
+    
     for stream in streams:
-        # Se não conhecemos a stream, adicionamos (assumindo origem desconhecida ou o próprio sender como gateway)
         if stream not in db.available_streams:
-             # Hack: usa o sender como "origem" temporária para saber que existe
-             db.addStream(stream, msg.getSrc())
+            db.addStream(stream, sender)
         
         current_upstream = _upstream_for(stream, db)
-
-        # Só propagamos se a métrica for útil (melhor caminho ou atualização do pai atual)
-        if db.update_announce(stream, total_delay, msg.getSrc()):
+        cost = stream_costs[stream]
+        
+        if db.update_announce(stream, cost, sender):
             should_propagate = True
+            streams_to_propagate.append(stream)
             _check_and_switch_parent(stream, current_upstream, db)
 
     if not should_propagate:
-        log_ev("METRIC_REQ_DROP", req=request_id, msg="Worse path, not propagating")
+        log_ev("METRIC_REQ_DROP", req=request_id, msg="Worse paths, not propagating")
         return
 
-    # Propaga para TODOS os vizinhos, exceto de quem veio (Flooding controlado)
+    # Propaga apenas streams que melhoraram
     neighbors = db.get_vizinhos()
-    sender = msg.getSrc()
-    
-    # Filtra sender
     targets = [n for n in neighbors if n != sender]
     
-    if targets:
+    if targets and streams_to_propagate:
         for neighbor in targets:
-            # Mede RTT até o vizinho antes de enviar
             rtt = measure_rtt(neighbor)
-
-            new_accumulated_delay = total_delay + rtt
+            
+            # Calcula delays por stream para este vizinho
+            new_accumulated_delays = {}
+            for stream in streams_to_propagate:
+                new_accumulated_delays[stream] = stream_costs[stream] + rtt
             
             fwd_msg = Message(Message.VIDEO_METRIC_REQUEST, db.get_my_ip(neighbor))
-            fwd_msg.metrics_encode(
-                streams,
+            fwd_msg.metrics_encode_per_stream(
+                streams_to_propagate,
                 request_id=request_id,
-                accumulated_delay_ms=new_accumulated_delay# Adiciona custo do link
+                accumulated_delays=new_accumulated_delays
             )
             send_message(fwd_msg, neighbor, ROUTERS_RECEIVER_PORT)
-            log_ev("METRIC_REQ_FWD", req=request_id, to=neighbor, delay=new_accumulated_delay + rtt, rtt=rtt)
+            log_ev("METRIC_REQ_FWD", req=request_id, to=neighbor, streams=streams_to_propagate, rtt=rtt)
     else:
-        log_ev("METRIC_REQ_LEAF", req=request_id, msg="No other neighbors to forward")
+        log_ev("METRIC_REQ_LEAF", req=request_id, msg="No neighbors or no improved streams")
 
 
 def metric_response_handler(msg: Message, db: DataBase):
@@ -270,54 +287,57 @@ def metric_response_handler(msg: Message, db: DataBase):
         return
     
     request_id = payload.get("request_id")
-    incoming_delay = float(payload.get("accumulated_delay_ms", 0))
+    accumulated_delays = payload.get("accumulated_delays", {})
     streams = payload.get("streams", [])
+    
+    # Validação de segurança
+    if not isinstance(accumulated_delays, dict):
+        if isinstance(accumulated_delays, (int, float)):
+            accumulated_delays = {s: float(accumulated_delays) for s in streams}
+        else:
+            accumulated_delays = {s: 0.0 for s in streams}
     
     if not request_id or not streams:
         print("[ONODE][METRIC_RESP] Missing request_id or streams")
         return
     
-    # RTT local até quem enviou a resposta
     local_rtt_ms = measure_rtt(msg.getSrc())
-
-    delay_before_adjustments = incoming_delay + local_rtt_ms
-
-    has_cache = False
+    
+    # Processa cada stream individualmente
+    stream_costs = {}
+    
     for stream in streams:
-        if _is_stream_active_locally(stream, db):
-            has_cache = True
-            break
+        incoming_delay = float(accumulated_delays.get(stream, 0))
+        delay_before_adjustments = incoming_delay + local_rtt_ms
+        
+        total_delay_ms = _apply_delay_adjustments(delay_before_adjustments, stream, db)
+        stream_costs[stream] = total_delay_ms
+        
+        log_ev("METRIC_RESP_RECV",
+               req=request_id,
+               stream=stream,
+               cost=total_delay_ms,
+               parent=msg.getSrc(),
+               incoming_ms=incoming_delay,
+               rtt_ms=local_rtt_ms,
+               has_cache=_is_stream_active_locally(stream, db))
 
-    total_delay_ms = _apply_delay_adjustments(delay_before_adjustments, has_cache)
-
-    log_ev("METRIC_RESP_RECV",
-           req=request_id,
-           streams=streams,
-           cost=total_delay_ms,
-           parent=msg.getSrc(), 
-           from_=msg.getSrc(),
-           incoming_ms=incoming_delay,
-           rtt_ms=local_rtt_ms,
-           before_adjustments=delay_before_adjustments,
-           after_adjustments=total_delay_ms,
-           has_cache=has_cache)
-
-    # Atualiza métricas e possivelmente best_parent para cada stream
-    db.AtualizaMetricas(msg.getSrc(), streams, total_delay_ms)
+    # Atualiza métricas por stream
     for stream in streams:
+        db.AtualizaMetricas(msg.getSrc(), [stream], stream_costs[stream])
         current_upstream = _upstream_for(stream, db)
-        if db.update_announce(stream, total_delay_ms, msg.getSrc()):
+        if db.update_announce(stream, stream_costs[stream], msg.getSrc()):
             _check_and_switch_parent(stream, current_upstream, db)
 
     stored = db.get_metric_request(request_id)
     
     if stored:
-        # Nó originador da requisição
         db.remove_metric_request(request_id)
-        log_ev("METRIC_RESP_ORIGIN", req=request_id, streams=streams, cost=total_delay_ms, parent=msg.getSrc(), total_ms=total_delay_ms, rtt_ms=local_rtt_ms)
+        log_ev("METRIC_RESP_ORIGIN", req=request_id, streams=streams, 
+               costs={s: stream_costs[s] for s in streams})
         return
 
-    # Nó intermediário: propaga downstream (quem pediu/está ativo)
+    # Propaga downstream
     downstream_neighbors = set()
     with db.lock:
         for stream in streams:
@@ -328,15 +348,14 @@ def metric_response_handler(msg: Message, db: DataBase):
     if downstream_neighbors:
         for downstream in downstream_neighbors:
             fwd_msg = Message(Message.VIDEO_METRIC_RESPONSE, db.get_my_ip(downstream))
-            fwd_msg.metrics_encode(
+            fwd_msg.metrics_encode_per_stream(
                 streams,
                 request_id=request_id,
-                accumulated_delay_ms=total_delay_ms
+                accumulated_delays=stream_costs
             )
             send_message(fwd_msg, downstream, ROUTERS_RECEIVER_PORT)
-            log_ev("METRIC_RESP_FWD", req=request_id, streams=streams, cost=total_delay_ms, parent=msg.getSrc(), to=downstream, total_ms=total_delay_ms, from_=msg.getSrc())
-    else:
-        log_ev("METRIC_RESP_NO_DS", req=request_id, streams=streams)
+            log_ev("METRIC_RESP_FWD", req=request_id, to=downstream, costs=stream_costs)
+    
 
 def metric_update_handler(msg: Message, db: DataBase):
     try:
@@ -350,79 +369,82 @@ def metric_update_handler(msg: Message, db: DataBase):
         return
     
     streams = payload.get("streams", [])
-    accumulated_delay = payload.get("accumulated_delay_ms", 0)
+    accumulated_delays = payload.get("accumulated_delays", {})
     request_id = payload.get("request_id")
+    
+    # Validação de segurança
+    if not isinstance(accumulated_delays, dict):
+        if isinstance(accumulated_delays, (int, float)):
+            accumulated_delays = {s: float(accumulated_delays) for s in streams}
+        else:
+            accumulated_delays = {s: 0.0 for s in streams}
     
     if not streams:
         print("[ONODE][METRIC_UPDATE] Missing streams")
         return
     
-    has_cache = False
-    for stream in streams:
-        if _is_stream_active_locally(stream, db):
-            has_cache = True
-            break
+    # Processa cada stream com seu delay específico
+    stream_costs = {}
     
-    adjusted_delay = _apply_delay_adjustments(accumulated_delay, has_cache)
-
-    # Atualiza métricas locais com o delay acumulado
-    db.AtualizaMetricas(msg.getSrc(), streams, adjusted_delay)
-    log_ev("METRIC_UPDATE_RECV",
-           req=request_id,
-           streams=streams,
-           cost=accumulated_delay,
-           parent=msg.getSrc(),
-           delay_before=accumulated_delay,
-           delay_after=adjusted_delay,
-           has_cache=has_cache,
-           from_=msg.getSrc())
-    
-    # Atualiza tabela de roteamento e verifica switch
     for stream in streams:
+        incoming_delay = float(accumulated_delays.get(stream, 0))
+        adjusted_delay = _apply_delay_adjustments(incoming_delay, stream, db)
+        stream_costs[stream] = adjusted_delay
+        
+        log_ev("METRIC_UPDATE_RECV",
+               req=request_id,
+               stream=stream,
+               cost=adjusted_delay,
+               parent=msg.getSrc(),
+               has_cache=_is_stream_active_locally(stream, db))
+    
+    # Atualiza métricas e verifica switches
+    for stream in streams:
+        db.AtualizaMetricas(msg.getSrc(), [stream], stream_costs[stream])
         current_upstream = _upstream_for(stream, db)
-        if db.update_announce(stream, accumulated_delay, msg.getSrc()):
+        if db.update_announce(stream, stream_costs[stream], msg.getSrc()):
             _check_and_switch_parent(stream, current_upstream, db)
 
-    # Propaga o UPDATE para vizinhos downstream (que não são a origem)
+    # Propaga para downstream
     stored = db.get_metric_request(request_id) if request_id else None
     
     if stored:
-        # Se temos a requisição original, propaga para quem pediu
         downstream = stored.get("src")
         if downstream and downstream != msg.getSrc():
             rtt = measure_rtt(downstream)
+            
+            new_delays = {s: stream_costs[s] + rtt for s in streams}
+            
             update_msg = Message(Message.VIDEO_METRIC_UPDATE, db.get_my_ip(downstream))
-            update_msg.metrics_encode(
+            update_msg.metrics_encode_per_stream(
                 streams,
                 request_id=request_id,
-                accumulated_delay_ms=adjusted_delay + rtt
+                accumulated_delays=new_delays
             )
             send_message(update_msg, downstream, ROUTERS_RECEIVER_PORT)
-            log_ev("METRIC_UPDATE_FWD", req=request_id, streams=streams, cost=adjusted_delay + rtt, parent=msg.getSrc(), delay_ms=adjusted_delay, to=downstream, from_=msg.getSrc(), rtt=rtt)
+            log_ev("METRIC_UPDATE_FWD", req=request_id, to=downstream, costs=new_delays)
         
-        # Remove requisição processada
         db.remove_metric_request(request_id)
     else:
-        # Se não temos requisição armazenada, este update veio de outra fonte
-        # Propaga para todos os vizinhos downstream ativos para estas streams
         with db.lock:
             downstream_neighbors = set()
             for stream in streams:
-                # Encontra vizinhos que estão recebendo esta stream
                 for viz, active_streams in db.active_streams_table.items():
                     if active_streams.get(stream) == 1 and viz != msg.getSrc():
                         downstream_neighbors.add(viz)
             
             for downstream in downstream_neighbors:
                 rtt = measure_rtt(downstream)
+                new_delays = {s: stream_costs[s] + rtt for s in streams}
+                
                 update_msg = Message(Message.VIDEO_METRIC_UPDATE, db.get_my_ip(downstream))
-                update_msg.metrics_encode(
+                update_msg.metrics_encode_per_stream(
                     streams,
                     request_id=request_id or f"fwd-{int(dt.datetime.now().timestamp()*1000)}",
-                    accumulated_delay_ms=adjusted_delay + rtt
+                    accumulated_delays=new_delays
                 )
                 send_message(update_msg, downstream, ROUTERS_RECEIVER_PORT)
-                log_ev("METRIC_UPDATE_BCAST", req=request_id, streams=streams, cost=adjusted_delay + rtt, parent=msg.getSrc(), delay_ms=adjusted_delay, to=downstream, from_=msg.getSrc(), rtt=rtt)
+                log_ev("METRIC_UPDATE_BCAST", req=request_id, to=downstream, costs=new_delays)
 
 
 # =============================================================
