@@ -250,10 +250,6 @@ def metric_request_handler(msg: Message, db: DataBase):
         if n != sender and db.is_neighbor_alive(n, HEARTBEAT_TIMEOUT)
     ]
     
-    if not targets:
-        log_ev("METRIC_REQ_NO_ALIVE", req=request_id, msg="No alive neighbors to propagate")
-        return
-    
     if streams_to_propagate:
         for neighbor in targets:
             rtt = measure_rtt(neighbor)
@@ -574,8 +570,6 @@ def sender(db:DataBase):
                     if attempt < max_retries - 1:
                         time.sleep(0.2)
                         continue
-            if not success:
-                log_ev("TX_DROP", type=msg.getType(), host=host, port=port, retries=max_retries)
 
         except Exception as e:
             log_ev("SENDER_ERR", err=e)
@@ -827,7 +821,7 @@ def heartbeat_check(db: DataBase):
                         db.best_cost[s] = math.inf  # reset para aceitar anúncio seguinte mesmo com custo maior
                         affected_streams.add(s)
 
-                    log_ev("HB_NEIGH_DOWN", viz=viz, parents_reset=to_reset)
+                    # log_ev("HB_NEIGH_DOWN", viz=viz, parents_reset=to_reset)
 
             for stream_id in affected_streams:
                 parent = _upstream_for(stream_id, db)
