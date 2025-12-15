@@ -199,8 +199,10 @@ def cntrl(sdb:ServerDataBase):
                                 if typeOfMsg == Message.ADD_NEIGHBOUR:
                                     print(f"ADD_NEIGHBOUR from {msgr_ip}")
                                     sdb.inicializaVizinho(msgr_ip)
-                                    msg_resp = Message(Message.RESP_NEIGHBOUR, sdb.get_my_ip(msgr_ip), "")
-                                    _send_buffer(conn, msg_resp.serialize() + b'\n')
+                                    # Não enviamos resposta na mesma conexão pois o remetente (onode/client)
+                                    # fecha a conexão imediatamente após enviar.
+                                    # msg_resp = Message(Message.RESP_NEIGHBOUR, sdb.get_my_ip(msgr_ip), "")
+                                    # _send_buffer(conn, msg_resp.serialize() + b'\n')
                                 elif typeOfMsg == Message.RESP_NEIGHBOUR:
                                     sdb.inicializaVizinho(msgr_ip)
                                 elif typeOfMsg == Message.VIDEO_METRIC_RESPONSE:
