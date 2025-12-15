@@ -135,7 +135,7 @@ class ServerDataBase():
 
     def record_metric(self, vizinho, streams, delay_ms, request_id=None):
         with self.lock:
-            print(f"[SERVER][METRIC_STORE] vizinho={vizinho} streams={streams} delay_ms={delay_ms} request_id={request_id}")
+            print(f"salvar metricas vizinho={vizinho} streams={streams} delay_ms={delay_ms} request_id={request_id}")
             metrics = self.stream_metrics.setdefault(vizinho, {})
             timestamp = dt.datetime.now().isoformat()
             for stream in streams:
@@ -149,12 +149,6 @@ class ServerDataBase():
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:
-        sdb = ServerDataBase("S1")   # alterar depois no trabalho final
-        print(sdb.initiate_stream("10.0.0.1","stream1"))
-        print(sdb.stream_vizinhos)
-        print(sdb.end_stream("10.0.0.1","stream1"))
-        print(sdb.stream_vizinhos)
-
-        print(sdb.get_streams())
+        print("error: missing server name argument")
     else:
         sdb = ServerDataBase(sys.argv[1])

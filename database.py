@@ -40,7 +40,7 @@ class DataBase():
         self.best_parent = {}         # stream_id -> ip vizinho
         self.best_cost = {}           # stream_id -> métrica
         self.seen_msgs = set()
-        self.hysteresis_factor = 0.9
+        self.hysteresis_factor = 0.8  # o valor é alterado por onode.py
         self.downstream = {}          # stream_id -> set(vizinhos downstream ativos)
 
         print("Initialized neighbours (ip -> [neighbours]):", self.ip_to_viz)
