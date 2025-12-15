@@ -30,10 +30,10 @@ ANNOUNCE_TYPE = Message.VIDEO_METRIC_REQUEST  # reutilizamos como ANNOUNCE
 
 HEARTBEAT_INTERVAL = 1      # segundos
 HEARTBEAT_TIMEOUT  = 3      # segundos (reduzido para detecção mais rápida de falhas)
-HYST_FACTOR = 0.8           
+HYST_FACTOR = 0.75           
 
-HOP_PENALTY_PERCENT = 0.10
-CACHE_BONUS_PERCENT = 0.3   
+HOP_PENALTY_PERCENT = 0.15
+CACHE_BONUS_PERCENT = 0.35   
 
 
 def log_ev(tag: str, **fields):
