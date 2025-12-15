@@ -121,30 +121,21 @@ def sender(sdb:ServerDataBase):
                 if not vs:
                     continue
 
-                # Verifica se é hora de mandar o próximo frame desta stream
                 target_time = stream_next_time.get(stream_id, now)
                 
-                # Se estamos adiantados (target_time > now), não manda nada ainda
                 if target_time > now:
                     continue
                 
-                # Se estamos muito atrasados (> 0.5s), reseta o clock para evitar burst
                 if now - target_time > 0.5:
                     target_time = now
                 
-                # Atualiza o tempo alvo para o próximo frame
                 stream_next_time[stream_id] = target_time + (1.0 / FPS)
 
-                # Tenta ler 1 frame por vez para suavizar o tráfego (evita bursts)
                 frame = vs.nextFrame()
                 if frame:
-                    # stream_key = "<server>:<stream>"
-                    # FIX: Use simple stream_id to match signaling (client requests "stream1", not "S1:stream1")
                     stream_key = stream_id 
                     stream_num = _stream_id_to_int(stream_key)
                     
-                    # Formato Batch de 1 frame para compatibilidade: Count(1B) + Len(4B) + Frame
-                    # Isso mantém a compatibilidade com o cliente que espera um batch
                     packed_frames = struct.pack("!B", 1) + struct.pack("!I", len(frame)) + frame
 
                     payload = stream_key.encode('utf-8') + b'\0' + packed_frames
@@ -199,10 +190,6 @@ def cntrl(sdb:ServerDataBase):
                                 if typeOfMsg == Message.ADD_NEIGHBOUR:
                                     print(f"ADD_NEIGHBOUR from {msgr_ip}")
                                     sdb.inicializaVizinho(msgr_ip)
-                                    # Não enviamos resposta na mesma conexão pois o remetente (onode/client)
-                                    # fecha a conexão imediatamente após enviar.
-                                    # msg_resp = Message(Message.RESP_NEIGHBOUR, sdb.get_my_ip(msgr_ip), "")
-                                    # _send_buffer(conn, msg_resp.serialize() + b'\n')
                                 elif typeOfMsg == Message.RESP_NEIGHBOUR:
                                     sdb.inicializaVizinho(msgr_ip)
                                 elif typeOfMsg == Message.VIDEO_METRIC_RESPONSE:
@@ -233,7 +220,6 @@ def cntrl(sdb:ServerDataBase):
 
 def send_control_message(host, message: Message):
     try:
-        #print(f"SEND -> {host} type={message.getType()} data={message.getData()}")
         with socket.create_connection((host, ROUTERS_RECEIVER_PORT), timeout=5) as ctrl:
             _send_buffer(ctrl, message.serialize() + b'\n')
     except Exception as e:
@@ -272,7 +258,6 @@ def heartbeat_check(sdb: ServerDataBase):
                 neighbors = list(sdb.server_vizinhos.keys())
             for viz in neighbors:
                 if not sdb.is_neighbor_alive(viz, HEARTBEAT_TIMEOUT):
-                    #print(f"viz={viz}")
                     sdb.mark_neighbor_down(viz)
         except Exception as e:
             pass
@@ -299,7 +284,6 @@ def metric_updater(sdb:ServerDataBase):
                 request_id = f"req-{uuid.uuid4().hex[:10]}"
                 sdb.register_metric_request(request_id, viz, streams)
                 
-                # Mede RTT até o vizinho antes de enviar
                 rtt = measure_rtt(viz)
                 
                 print(f"METRIC_UPDATE to={viz} streams={streams} request_id={request_id} rtt={rtt:.2f}ms")

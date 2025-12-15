@@ -30,7 +30,7 @@ ANNOUNCE_TYPE = Message.VIDEO_METRIC_REQUEST  # reutilizamos como ANNOUNCE
 
 HEARTBEAT_INTERVAL = 1      # segundos
 HEARTBEAT_TIMEOUT  = 3      # segundos (reduzido para detecção mais rápida de falhas)
-HYST_FACTOR = 0.9           # mesma ideia do DB; opcional sobrescrever
+HYST_FACTOR = 0.8           
 
 HOP_PENALTY_MS = 1.0    # penalidade fixa por hop (ms)
 CACHE_BONUS_MS = 1.0     # bônus por stream em cache (ms)

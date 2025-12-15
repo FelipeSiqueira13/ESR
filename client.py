@@ -98,7 +98,6 @@ def _start_ffplay(window_title):
     except Exception as e:
         print(f"Error starting ffplay: {e}")
         return False
-        return False
 
 def _stop_ffplay():
     global _ffplay_process
