@@ -618,13 +618,10 @@ def main():
     try:
         # Loop de seleção
         while current_stream is None:
-            stream_choice = input("Select a stream by name (or 'quit' to exit, 'ping <stream>' to ping): ")
+            stream_choice = input("Select a stream by name (or 'quit' to exit): ")
             if stream_choice.lower() == 'quit':
                 return
-            if stream_choice.lower().startswith("ping "):
-                sid = stream_choice.split(None, 1)[1].strip()
-                print(send_ping(node_host, node_port, clientName, sid))
-                continue
+     
             
             print(f"Requesting stream: {stream_choice}")
             response = requestStream(node_host, node_port, clientName, stream_choice)
